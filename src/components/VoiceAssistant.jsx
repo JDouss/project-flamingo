@@ -541,7 +541,9 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
         audioUrl = URL.createObjectURL(audioFile);
       }
 
-      setUploade      // Helper to fetch base64 from URL
+      setUploadedAudioUrl(audioUrl);
+
+      // Helper to fetch base64 from URL
       const fetchBase64FromUrl = async (url) => {
         const res = await fetch(url);
         const blob = await res.blob();
