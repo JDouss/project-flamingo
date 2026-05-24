@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { X, Key, UploadCloud, FileAudio, AlertTriangle, Sparkles, Check, Loader2, Volume2, ArrowRight } from 'lucide-react';
+import { X, Key, UploadCloud, FileAudio, AlertTriangle, Sparkles, Check, Loader2, Volume2, ArrowRight, Mic, Square, Play, Trash2, Save, User, FileUp } from 'lucide-react';
 import { db, storage } from '../firebase';
-import { collection, addDoc, getDocs, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, orderBy, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { renderMarkdown } from '../utils/markdown';
 
@@ -35,10 +35,23 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
   const [showRawEditor, setShowRawEditor] = useState(false);
 
   // Tab view states
-  const [activeTab, setActiveTab] = useState('new'); // new, history
+  const [activeTab, setActiveTab] = useState('new'); // new, history, members
   const [uploadedAudioUrl, setUploadedAudioUrl] = useState('');
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Speaker registry states
+  const [registry, setRegistry] = useState([]);
+  const [loadingRegistry, setLoadingRegistry] = useState(false);
+  const [savingSpeakerId, setSavingSpeakerId] = useState(null);
+
+  // MediaRecorder states
+  const [recordingSpeakerId, setRecordingSpeakerId] = useState(null);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordCountdown, setRecordCountdown] = useState(10);
+  const [recordIntervalId, setRecordIntervalId] = useState(null);
+  const [audioChunks, setAudioChunks] = useState([]);
 
   // Fetch History
   const fetchHistory = async () => {
@@ -64,10 +77,290 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
     }
   };
 
-  // Load history when modal opens or tab changes
+  // Fetch/Seed Speakers Registry
+  const fetchRegistry = async () => {
+    setLoadingRegistry(true);
+    try {
+      let list = [];
+      if (!isDemoMode) {
+        const querySnapshot = await getDocs(collection(db, 'speakers_registry'));
+        list = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+      } else {
+        list = JSON.parse(localStorage.getItem('flamingo_speakers_registry') || '[]');
+      }
+
+      // Seed defaults if empty
+      if (list.length === 0) {
+        const defaults = [
+          { id: 'miembro_1', name: 'Jaime', persona: 'Analista de contexto histórico y político', audioUrl: '', audioBase64: '' },
+          { id: 'miembro_2', name: 'Almu', persona: 'Lectora emocional, centrada en la psicología de personajes', audioUrl: '', audioBase64: '' },
+          { id: 'miembro_3', name: 'Alejandro', persona: 'Crítico literario, enfocado en estructura y ritmo narrativo', audioUrl: '', audioBase64: '' },
+          { id: 'miembro_4', name: 'Joaquin', persona: 'Lector escéptica, atento a giros de guión e inconsistencias', audioUrl: '', audioBase64: '' },
+          { id: 'miembro_5', name: 'Zepe', persona: 'Bibliófilo apasionado de la metaliteratura y el libro físico', audioUrl: '', audioBase64: '' }
+        ];
+
+        if (!isDemoMode) {
+          for (const item of defaults) {
+            await setDoc(doc(db, 'speakers_registry', item.id), item);
+          }
+        } else {
+          localStorage.setItem('flamingo_speakers_registry', JSON.stringify(defaults));
+        }
+        list = defaults;
+      } else {
+        // Auto-migrate old names if they exist in DB/localStorage
+        const oldToNew = {
+          'Juan': 'Jaime',
+          'Sofía': 'Almu',
+          'Carlos': 'Alejandro',
+          'Elena': 'Joaquin',
+          'Diego': 'Zepe'
+        };
+        let migrated = false;
+        list = list.map(item => {
+          if (oldToNew[item.name]) {
+            item.name = oldToNew[item.name];
+            migrated = true;
+            if (!isDemoMode) {
+              setDoc(doc(db, 'speakers_registry', item.id), item).catch(err => console.error(err));
+            }
+          }
+          return item;
+        });
+        if (migrated && isDemoMode) {
+          localStorage.setItem('flamingo_speakers_registry', JSON.stringify(list));
+        }
+      }
+
+      list.sort((a, b) => a.id.localeCompare(b.id));
+      setRegistry(list);
+    } catch (err) {
+      console.error("Error al cargar el registro de miembros:", err);
+    } finally {
+      setLoadingRegistry(false);
+    }
+  };
+
+  // Update a single speaker metadata in the registry
+  const handleUpdateSpeakerMeta = (index, field, value) => {
+    setRegistry(prev => {
+      const copy = [...prev];
+      copy[index] = { ...copy[index], [field]: value };
+      return copy;
+    });
+  };
+
+  // Save speaker profile
+  const handleSaveSpeakerProfile = async (index) => {
+    const speaker = registry[index];
+    setSavingSpeakerId(speaker.id);
+    try {
+      if (!isDemoMode) {
+        await setDoc(doc(db, 'speakers_registry', speaker.id), {
+          name: speaker.name,
+          persona: speaker.persona,
+          audioUrl: speaker.audioUrl || '',
+          audioBase64: speaker.audioBase64 || ''
+        });
+      } else {
+        const listCopy = [...registry];
+        localStorage.setItem('flamingo_speakers_registry', JSON.stringify(listCopy));
+      }
+      alert(`Perfil de ${speaker.name} guardado con éxito.`);
+    } catch (err) {
+      console.error("Error al guardar perfil de miembro:", err);
+      alert("Error al guardar: " + err.message);
+    } finally {
+      setSavingSpeakerId(null);
+    }
+  };
+
+  // MediaRecorder handlers for Voice Signatures
+  const startRecordingVoice = async (speakerId) => {
+    if (isRecording) return;
+    
+    setAudioChunks([]);
+    setRecordingSpeakerId(speakerId);
+    setRecordCountdown(10);
+    setIsRecording(true);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      
+      const chunks = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+        
+        // Stop all tracks
+        stream.getTracks().forEach(track => track.stop());
+
+        // Save
+        await handleSaveVoiceprint(speakerId, audioBlob);
+      };
+
+      recorder.start();
+      setMediaRecorder(recorder);
+
+      // Countdown
+      const intervalId = setInterval(() => {
+        setRecordCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(intervalId);
+            if (recorder && recorder.state !== 'inactive') {
+              recorder.stop();
+            }
+            setIsRecording(false);
+            setRecordingSpeakerId(null);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      setRecordIntervalId(intervalId);
+    } catch (err) {
+      console.error("Error al acceder al micrófono:", err);
+      alert("No se pudo acceder al micrófono. Verifica los permisos de tu navegador.");
+      setIsRecording(false);
+      setRecordingSpeakerId(null);
+    }
+  };
+
+  const stopRecordingVoice = () => {
+    if (!isRecording) return;
+    setIsRecording(false);
+    if (recordIntervalId) {
+      clearInterval(recordIntervalId);
+      setRecordIntervalId(null);
+    }
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+    setRecordingSpeakerId(null);
+  };
+
+  const handleUploadVoiceprintFile = async (speakerId, e) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const fileNameLower = file.name.toLowerCase();
+      const isAudioType = file.type && file.type.startsWith('audio/');
+      const hasAudioExt = 
+        fileNameLower.endsWith('.mp3') || 
+        fileNameLower.endsWith('.wav') || 
+        fileNameLower.endsWith('.m4a') || 
+        fileNameLower.endsWith('.ogg') ||
+        fileNameLower.endsWith('.webm');
+
+      if (!isAudioType && !hasAudioExt) {
+        alert("Por favor, selecciona un archivo de audio válido (.mp3, .wav, .m4a, .ogg o .webm).");
+        return;
+      }
+      
+      await handleSaveVoiceprint(speakerId, file);
+    }
+    e.target.value = '';
+  };
+
+  const handleSaveVoiceprint = async (speakerId, blob) => {
+    setSavingSpeakerId(speakerId);
+    try {
+      let audioUrl = '';
+      let audioBase64 = '';
+
+      // Convert blob to Base64
+      const reader = new FileReader();
+      const base64Promise = new Promise((resolve) => {
+        reader.onloadend = () => {
+          const base64String = reader.result.split(',')[1];
+          resolve(base64String);
+        };
+      });
+      reader.readAsDataURL(blob);
+      audioBase64 = await base64Promise;
+
+      if (!isDemoMode) {
+        // Upload to Storage
+        const storageRef = ref(storage, `voiceprints/${Date.now()}_${speakerId}.webm`);
+        const uploadTask = uploadBytesResumable(storageRef, blob);
+        await new Promise((resolve, reject) => {
+          uploadTask.on(
+            'state_changed',
+            null,
+            (err) => reject(err),
+            async () => {
+              audioUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve();
+            }
+          );
+        });
+      } else {
+        audioUrl = URL.createObjectURL(blob);
+      }
+
+      // Update local state
+      setRegistry(prev => {
+        const index = prev.findIndex(s => s.id === speakerId);
+        if (index === -1) return prev;
+        const copy = [...prev];
+        copy[index] = { 
+          ...copy[index], 
+          audioUrl: audioUrl,
+          audioBase64: audioBase64
+        };
+        
+        if (!isDemoMode) {
+          setDoc(doc(db, 'speakers_registry', speakerId), copy[index]).catch(e => console.error(e));
+        } else {
+          localStorage.setItem('flamingo_speakers_registry', JSON.stringify(copy));
+        }
+        return copy;
+      });
+
+      alert("Firma de voz registrada con éxito.");
+    } catch (err) {
+      console.error("Error al guardar firma de voz:", err);
+      alert("Error al registrar firma de voz: " + err.message);
+    } finally {
+      setSavingSpeakerId(null);
+    }
+  };
+
+  const handleDeleteVoiceprint = async (speakerId) => {
+    if (!window.confirm("¿Estás seguro de que deseas borrar la firma de voz registrada de este miembro?")) return;
+    
+    setRegistry(prev => {
+      const index = prev.findIndex(s => s.id === speakerId);
+      if (index === -1) return prev;
+      const copy = [...prev];
+      copy[index] = {
+        ...copy[index],
+        audioUrl: '',
+        audioBase64: ''
+      };
+      if (!isDemoMode) {
+        setDoc(doc(db, 'speakers_registry', speakerId), copy[index]).catch(e => console.error(e));
+      } else {
+        localStorage.setItem('flamingo_speakers_registry', JSON.stringify(copy));
+      }
+      return copy;
+    });
+  };
+
+  // Load history and speaker registry when modal opens or tab changes
   useEffect(() => {
     if (isOpen) {
       fetchHistory();
+      fetchRegistry();
     }
   }, [isOpen, activeTab, isDemoMode]);
 
@@ -248,30 +541,83 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
         audioUrl = URL.createObjectURL(audioFile);
       }
 
-      setUploadedAudioUrl(audioUrl);
+      setUploade      // Helper to fetch base64 from URL
+      const fetchBase64FromUrl = async (url) => {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(blob);
+          reader.onloadend = () => {
+            const base64String = reader.result.split(',')[1];
+            resolve(base64String);
+          };
+          reader.onerror = reject;
+        });
+      };
 
-      // 2. Convert file to Base64 for the API request
+      // 2. Load and prepare speaker voiceprints
       setStatus('analyzing');
-      setProgressMsg('Subiendo y transcribiendo el audio con Gemini 2.5 Flash... (Esto puede tomar entre 30 y 90 segundos para grabaciones largas)');
-      
+      setProgressMsg('Preparando firmas de voz de referencia...');
+
+      const referenceParts = [];
+      const enrolledSpeakers = registry.filter(s => s.audioUrl || s.audioBase64);
+
+      for (const speaker of enrolledSpeakers) {
+        try {
+          let b64 = speaker.audioBase64;
+          if (!b64 && speaker.audioUrl) {
+            setProgressMsg(`Cargando firma de voz de ${speaker.name}...`);
+            b64 = await fetchBase64FromUrl(speaker.audioUrl);
+          }
+          if (b64) {
+            referenceParts.push({
+              inlineData: {
+                mimeType: 'audio/webm',
+                data: b64
+              }
+            });
+            referenceParts.push({
+              text: `Firma de voz de referencia de ${speaker.name}. Nombre real: ${speaker.name}. Perfil literario / estilo: ${speaker.persona}`
+            });
+          }
+        } catch (fetchErr) {
+          console.warn(`Error al cargar firma de voz para ${speaker.name}:`, fetchErr);
+        }
+      }
+
+      setProgressMsg('Transcribiendo y analizando reunión con Gemini 2.5 Flash... (Esto puede tomar entre 30 y 90 segundos)');
       const base64Data = await fileToBase64(audioFile);
-      
+
+      // Build the parts payload for Gemini
+      const mainAudioPart = {
+        inlineData: {
+          mimeType: getGeminiMimeType(audioFile),
+          data: base64Data
+        }
+      };
+
       const expectedSpeakersConstraint = expectedSpeakers === 'auto' 
         ? 'Detecta automáticamente el número de hablantes participando en la conversación.'
-        : `El número esperado de hablantes es exactamente ${expectedSpeakers}. Agrupa todos los segmentos de diálogo e hilos de conversación en exactamente ${expectedSpeakers} perfiles de hablante. Evita crear perfiles adicionales por variaciones temporales en el tono de voz, volumen o ruido de fondo; si el estilo de habla, el contexto y la interacción sugieren que es la misma persona, agrúpalos bajo el mismo perfil.`;
+        : `El número esperado de hablantes es exactamente ${expectedSpeakers}.`;
 
       const prompt = `
 Eres un secretario experto y analista de clubes de lectura.
-Analiza la grabación de audio subida de una reunión de un club de lectura en español.
-Realiza la diarización de hablantes, transcribe y resume la discusión.
-${expectedSpeakersConstraint}
+Analiza el último archivo de audio adjunto, el cual es la grabación de una reunión de club de lectura en español.
+Los archivos de audio anteriores son firmas de voz de referencia de los miembros registrados, cada uno con una descripción de su nombre y perfil.
 
-Debes devolver tu respuesta estrictamente en formato JSON.
-El JSON debe cumplir con la siguiente estructura exacta:
+Instrucciones de análisis:
+1. Realiza la diarización de los hablantes en la grabación de la reunión principal.
+2. Compara acústicamente (timbre, tono, ritmo) las voces de la reunión con las firmas de voz de referencia provistas para identificar a qué miembro corresponde cada voz de la reunión.
+3. Si un participante se asemeja al estilo literario y a la firma de voz de un miembro registrado, identifícalo con su NOMBRE REAL en el campo "id".
+4. Si hay algún participante que no coincide con ninguna firma de voz, etiquétalo como "Invitado [Número]" (ej. "Invitado 1").
+5. ${expectedSpeakersConstraint}
+
+Debes devolver tu respuesta estrictamente en formato JSON con la siguiente estructura exacta:
 {
   "speakers": [
     {
-      "id": "Hablante A" (o Hablante 1, Hablante 2, etc.),
+      "id": "Nombre del Miembro" (ej. "Juan", "Sofía" o "Invitado 1"),
       "voiceSnippet": "Una cita directa de 1 frase dicha por este hablante que destaque su perspectiva o estilo de habla en español (ej. 'Yo considero que el final fue muy triste pero necesario.')",
       "summary": "Un resumen de 2 o 3 frases de las opiniones principales de este hablante y sus ideas generales sobre el libro, redactado estrictamente en primera persona singular (ej. 'Yo opiné que...', 'Pienso que...'). No uses la tercera persona.",
       "notesMarkdown": "Un documento detallado y extenso en Markdown (mínimo 200-300 palabras si el audio lo permite) que sirva como Notas Preliminares Privadas muy profundas para recordar mis pensamientos durante la lectura y discusión. Debe capturar toda mi perspectiva como hablante, pensamientos íntimos sobre la lectura, aportaciones e hipótesis discutidas, así como puntos clave de debate, acuerdos o desacuerdos profundos que mantuve con los otros participantes. Debe organizarse obligatoriamente con el siguiente esquema:\n\n# Notas preliminares de [Nombre del Hablante]\n## Mis Impresiones y Pensamientos Clave (en primera persona)\n- Detallar lo que yo pensé o sentí durante la lectura y qué partes me impactaron más.\n## Debates y Puntos de Vista con otros miembros\n- Registrar qué puntos de vista defendieron otros hablantes y en qué estuve de acuerdo o en desacuerdo, detallando la discusión.\n## Ideas y Estructura para mi Reseña Final\n- Mis conclusiones principales y cómo planeo estructurar mis argumentos para la reseña final.\n\nRegla de oro: Escribe esto de manera detallada y rica en información, usando viñetas y texto en negrita, todo estrictamente en primera persona singular ('yo', 'mis notas', 'discutí', 'me pareció')."
@@ -279,9 +625,11 @@ El JSON debe cumplir con la siguiente estructura exacta:
   ]
 }
 
-REGLA CRÍTICA DE REDACCIÓN: Tanto el "summary" como el "notesMarkdown" de CADA hablante deben redactarse como si fuera la propia persona escribiendo en primera persona singular ("yo", "me pareció", "sugerí", "mis notas"). Está estrictamente prohibido usar la tercera persona (por ejemplo, NO escribas "El hablante piensa...", "Hablante 1 mencionó...").
+REGLA CRÍTICA DE REDACCIÓN: Tanto el "summary" como el "notesMarkdown" de CADA hablante deben redactarse como si fuera la propia persona escribiendo en primera persona singular ("yo", "me pareció", "sugerí", "mis notas"). Está estrictamente prohibido usar la tercera persona (por ejemplo, NO escribas "El hablante piensa...", "Juan mencionó...").
 Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente escapado dentro del JSON. Todo el contenido generado DEBE estar en español. No incluyas ningún envoltorio de markdown como \`\`\`json. Devuelve únicamente el JSON crudo.
 `;
+
+      const requestParts = [...referenceParts, mainAudioPart, { text: prompt }];
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey.trim()}`,
@@ -293,17 +641,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
           body: JSON.stringify({
             contents: [
               {
-                parts: [
-                  {
-                    inlineData: {
-                      mimeType: getGeminiMimeType(audioFile),
-                      data: base64Data
-                    }
-                  },
-                  {
-                    text: prompt
-                  }
-                ]
+                parts: requestParts
               }
             ],
             generationConfig: {
@@ -348,37 +686,43 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
   };
 
   const handleSimulate5Speakers = () => {
+    const s1 = registry[0]?.name || "Juan";
+    const s2 = registry[1]?.name || "Sofía";
+    const s3 = registry[2]?.name || "Carlos";
+    const s4 = registry[3]?.name || "Elena";
+    const s5 = registry[4]?.name || "Diego";
+
     const simulatedResult = {
       speakers: [
         {
-          id: "Hablante 1 (El Crítico Literario)",
+          id: s1,
           voiceSnippet: "Yo considero que la estructura gótica de Barcelona no es un mero escenario, sino el personaje central que conecta las tragedias de Julián Carax y Daniel.",
           summary: "Yo opiné que la atmósfera gótica es el verdadero motor de la novela. Destaqué la influencia de autores del siglo XIX y defendí que el Cementerio de los Libros Olvidados representa la memoria histórica de España.",
-          notesMarkdown: `# Notas de Hablante 1 (Crítico Literario)\n\n## Mis Impresiones y Pensamientos Clave (en primera persona)\n- **Atmósfera Gótica**: Sostuve que la niebla, la lluvia constante y las mansiones en ruinas de Barcelona simbolizan la opresión y el trauma latente de la posguerra española.\n- **Estructura Narrativa**: Propuse que las tramas paralelas (Daniel/Beatriz y Julián/Penélope) funcionan como un espejo que advierte a Daniel sobre los peligros de repetir la trágica historia de Julián Carax.\n- *Trauma Histórico*: Sugerí que el inspector Fumero personifica el sadismo impune de la dictadura y cómo el dolor colectivo permea todas las relaciones en la obra.\n\n## Debates y Puntos de Vista con otros miembros\n- **Discusión con Hablante 4 (El Escéptico)**: Él argumentó que el libro recurre demasiado al melodrama. Yo discrepé firmemente, señalando que la combinación de romance decimonónico con misterio policíaco es una decisión estilística intencionada de Zafón para rendir homenaje a la literatura de folletín.\n- **Coincidencia con Hablante 3 (Analista Histórico)**: Estuve muy de acuerdo con su lectura sobre cómo el silencio forzado moldea la psicología evasiva de los personajes de la librería.\n\n## Ideas y Estructura para mi Reseña Final\n1. **Introducción**: Iniciar analizando la geografía mística de Barcelona como un reflejo exterior de la desolación interna de los personajes.\n2. **Nudo**: Centrar la reseña en la dualidad de Daniel y Julián, exponiendo cómo el amor por los libros prohibidos funciona como un acto de rebelión cultural contra un régimen opresivo.\n3. **Conclusión**: Cerrar evaluando si la novela ofrece una redención real mediante la escritura o si simplemente gira en un bucle inevitable.`
+          notesMarkdown: `# Notas de ${s1}\n\n## Mis Impresiones y Pensamientos Clave (en primera persona)\n- **Atmósfera Gótica**: Sostuve que la niebla, la lluvia constante y las mansiones en ruinas de Barcelona simbolizan la opresión y el trauma latente de la posguerra española.\n- **Estructura Narrativa**: Propuse que las tramas paralelas (Daniel/Beatriz y Julián/Penélope) funcionan como un espejo que advierte a Daniel sobre los peligros de repetir la trágica historia de Julián Carax.\n- *Trauma Histórico*: Sugerí que el inspector Fumero personifica el sadismo impune de la dictadura y cómo el dolor colectivo permea todas las relaciones en la obra.\n\n## Debates y Puntos de Vista con otros miembros\n- **Discusión con ${s4}**: Él/Ella argumentó que el libro recurre demasiado al melodrama. Yo discrepé firmemente, señalando que la combinación de romance decimonónico con misterio policíaco es una decisión estilística intencionada de Zafón para rendir homenaje a la literatura de folletín.\n- **Coincidencia con ${s3}**: Estuve muy de acuerdo con su lectura sobre cómo el silencio forzado moldea la psicología evasiva de los personajes de la librería.\n\n## Ideas y Estructura para mi Reseña Final\n1. **Introducción**: Iniciar analizando la geografía mística de Barcelona como un reflejo exterior de la desolación interna de los personajes.\n2. **Nudo**: Centrar la reseña en la dualidad de Daniel y Julián, exponiendo cómo el amor por los libros prohibidos funciona como un acto de rebelión cultural contra un régimen opresivo.\n3. **Conclusión**: Cerrar evaluando si la novela ofrece una redención real mediante la escritura o si simplemente gira en un bucle inevitable.`
         },
         {
-          id: "Hablante 2 (Lector Emocional)",
+          id: s2,
           voiceSnippet: "A mí lo que realmente me llegó al corazón fue la lealtad inquebrantable de Fermín; sus diálogos traen luz al relato más oscuro.",
           summary: "Yo me enfoqué en el plano emocional del libro. Expresé que la amistad entre Daniel y Fermín es el alma de la novela, rescatándola de ser una simple tragedia trágica y dándole esperanza.",
-          notesMarkdown: `# Notas de Hablante 2 (Lector Emocional)\n\n## Mis Impresiones y Pensamientos Clave (en primera persona)\n- **Lealtad y Luz**: Sentí una profunda conexión con el personaje de Fermín Romero de Torres. Sus ingeniosos comentarios y su lealtad inquebrantable hacia Daniel me parecieron el faro de esperanza en un entorno sumamente sombrío.\n- **Historias de Amor Trágicas**: Lloré con el destino de Penélope y Julián. Me dolió profundamente la revelación de la cripta y el confinamiento de Julián tras el incendio de sus manuscritos.\n\n## Debates y Puntos de Vista con otros miembros\n- **Discusión con Hablante 4 (El Escéptico)**: Él señaló que los personajes femeninos carecen de profundidad propia. Tuve que darle la razón en parte; admití que Beatriz y Penélope a veces parecen musas idealizadas en lugar de mujeres reales con voz propia, aunque defendí que su rol es el de catalizadores emocionales de la historia.\n- **Apoyo de Hablante 5 (El Bibliófilo)**: Coincidimos en que el amor incondicional por la literatura es el verdadero motor de salvación para Daniel.\n\n## Ideas y Estructura para mi Reseña Final\n1. **Introducción**: Centrar la reseña en el poder curativo de la amistad y la lealtad en tiempos de desolación.\n2. **Análisis de Personajes**: Desarrollar un perfil detallado de Fermín, destacando sus citas memorables sobre la vida, el amor y la comida.\n3. **Cierre**: Reflexionar sobre cómo la novela demuestra que el amor y la memoria de las personas que perdimos es lo único que nos protege de convertirnos en 'sombras' sin alma.`
+          notesMarkdown: `# Notas de ${s2}\n\n## Mis Impresiones y Pensamientos Clave (en primera persona)\n- **Lealtad y Luz**: Sentí una profunda conexión con el personaje de Fermín Romero de Torres. Sus ingeniosos comentarios y su lealtad inquebrantable hacia Daniel me parecieron el faro de esperanza en un entorno sumamente sombrío.\n- **Historias de Amor Trágicas**: Lloré con el destino de Penélope y Julián. Me dolió profundamente la revelación de la cripta y el confinamiento de Julián tras el incendio de sus manuscritos.\n\n## Debates y Puntos de Vista con otros miembros\n- **Discusión con ${s4}**: Él/Ella señaló que los personajes femeninos carecen de profundidad propia. Tuve que darle la razón en parte; admití que Beatriz y Penélope a veces parecen musas idealizadas en lugar de mujeres reales con voz propia, aunque defendí que su rol es el de catalizadores emocionales de la historia.\n- **Apoyo de ${s5}**: Coincidimos en que el amor incondicional por la literatura es el verdadero motor de salvación para Daniel.\n\n## Ideas y Estructura para mi Reseña Final\n1. **Introducción**: Centrar la reseña en el poder curativo de la amistad y la lealtad en tiempos de desolación.\n2. **Análisis de Personajes**: Desarrollar un perfil detallado de Fermín, destacando sus citas memorables sobre la vida, el amor y la comida.\n3. **Cierre**: Reflexionar sobre cómo la novela demuestra que el amor y la memoria de las personas que perdimos es lo único que nos protege de convertirnos en 'sombras' sin alma.`
         },
         {
-          id: "Hablante 3 (Analista Histórico)",
+          id: s3,
           voiceSnippet: "No podemos obviar el contexto de la Barcelona de 1945; el miedo en las calles y la censura configuran la timidez de los personajes.",
           summary: "Yo analicé la novela bajo una perspectiva socio-histórica. Argumenté que el ambiente de represión e inseguridad explica la necesidad de los personajes de refugiarse en la literatura.",
-          notesMarkdown: `# Notas de Hablante 3 (Analista Histórico)\n\n## Mis Impresiones y Pensamientos Clave (en primera persona)\n- **La Opresión de la Posguerra**: Destaqué la representación precisa que hace Zafón de la Barcelona bajo el franquismo, con la presencia constante de policías corruptos, el miedo a ser denunciado y la cartilla de racionamiento.\n- **La Resistencia Cultural**: Propuse que la librería Sempere funciona como un microcosmos de libertad cultural y resistencia moral silenciosa, donde las ideas prohibidas se protegen físicamente de la quema.\n\n## Debates y Puntos de Vista con otros miembros\n- **Discusión con Hablante 1 (El Crítico)**: Intercambiamos ideas sobre si el Cementerio de los Libros Olvidados tiene un significado místico o puramente político. Yo defendí que es una representación literal de las memorias censuradas y las vidas rotas que el régimen intentaba borrar activamente del mapa nacional.\n- **Encuentro con Hablante 5 (El Bibliófilo)**: Apoyé su idea de que rescatar un libro de la destrucción equivale a rescatar la verdad histórica.\n\n## Ideas y Estructura para mi Reseña Final\n1. **Perspectiva**: Darle un enfoque histórico a la reseña, evaluando la fidelidad de la atmósfera social frente a la realidad de la posguerra española.\n2. **Temática**: Analizar el personaje de Fumero no solo como un monstruo de ficción, sino como un retrato de los oportunistas violentos que se consolidaron en el aparato del Estado.\n3. **Conclusión**: Concluir destacando el libro como un recordatorio del peligro del olvido institucional e histórico.`
+          notesMarkdown: `# Notas de ${s3}\n\n## Mis Impresiones y Pensamientos Clave (en primera persona)\n- **La Opresión de la Posguerra**: Destaqué la representación precisa que hace Zafón de la Barcelona bajo el franquismo, con la presencia constante de policías corruptos, el miedo a ser denunciado y la cartilla de racionamiento.\n- **La Resistencia Cultural**: Propuse que la librería Sempere funciona como un microcosmos de libertad cultural y resistencia moral silenciosa, donde las ideas prohibidas se protegen físicamente de la quema.\n\n## Debates y Puntos de Vista con otros miembros\n- **Discusión con ${s1}**: Intercambiamos ideas sobre si el Cementerio de los Libros Olvidados tiene un significado místico o puramente político. Yo defendí que es una representación literal de las memorias censuradas y las vidas rotas que el régimen intentaba borrar activamente del mapa nacional.\n- **Encuentro con ${s5}**: Apoyé su idea de que rescatar un libro de la destrucción equivale a rescatar la verdad histórica.\n\n## Ideas y Estructura para mi Reseña Final\n1. **Perspectiva**: Darle un enfoque histórico a la reseña, evaluando la fidelidad de la atmósfera social frente a la realidad de la posguerra española.\n2. **Temática**: Analizar el personaje de Fumero no solo como un monstruo de ficción, sino como un retrato de los oportunistas violentos que se consolidaron en el aparato del Estado.\n3. **Conclusión**: Concluir destacando el libro como un recordatorio del peligro del olvido institucional e histórico.`
         },
         {
-          id: "Hablante 4 (El Escéptico)",
+          id: s4,
           voiceSnippet: "El libro me entretuvo muchísimo, pero encontré algunos giros de guión bastante forzados y personajes femeninos poco desarrollados.",
           summary: "Yo mantuve una postura crítica sobre el ritmo y el desarrollo de ciertos personajes. Aunque reconocí el gancho de la intriga, señalé que Beatriz y Penélope actúan más como ideales que como personas reales.",
-          notesMarkdown: `# Notas de Hablante 4 (El Escéptico)\n\n## Mis Impresiones y Pensamientos Clave (en primera persona)\n- **Estructura Predecible**: Aunque disfruté de la lectura rápida, sentí que la novela recurre a demasiados giros melodramáticos de la literatura victoriana de folletín y cartas explicativas de 30 páginas para resolver misterios complejos.\n- **Unidimensionalidad Femenina**: Me molestó que Beatriz Aguilar sirva principalmente como la recompensa romántica de Daniel, sin una motivación interna fuerte o un arco de crecimiento individual.\n\n## Debates y Puntos de Vista con otros miembros\n- **Discusión con Hablante 2 (Lector Emocional)**: Él defendía el final feliz y el valor purificador de las emociones. Yo argumenté que el final parece excesivamente forzado, resolviendo todos los conflictos con demasiada conveniencia y dejando de lado la crudeza trágica que se venía construyendo con la figura de Carax.\n- **Debate con Hablante 1 (El Crítico)**: Él sostenía que el melodrama es deliberado; yo mantuve que, aun si es una elección de género, le resta impacto de obra de arte seria y la acerca más a una novela comercial típica.\n\n## Ideas y Estructura para mi Reseña Final\n1. **Enfoque Crítico**: Escribir una reseña honesta y equilibrada que elogie el ritmo adictivo de la prosa de Zafón, pero que señale los fallos de coherencia y el abuso de los estereotipos de damiselas en apuros.\n2. **Sección Detallada**: Dedicar un párrafo a examinar los recursos narrativos facilones (como la extensa carta final de Nuria Monfort).\n3. **Cierre**: Valorar el libro como una excelente pieza de entretenimiento literario que, no obstante, no debe confundirse con una obra cumbre de la técnica narrativa.`
+          notesMarkdown: `# Notas de ${s4}\n\n## Mis Impresiones y Pensamientos Clave (en primera persona)\n- **Estructura Predecible**: Aunque disfruté de la lectura rápida, sentí que la novela recurre a demasiados giros melodramáticos de la literatura victoriana de folletín y cartas explicativas de 30 páginas para resolver misterios complejos.\n- **Unidimensionalidad Femenina**: Me molestó que Beatriz Aguilar sirva principalmente como la recompensa romántica de Daniel, sin una motivación interna fuerte o un arco de crecimiento individual.\n\n## Debates y Puntos de Vista con otros miembros\n- **Discusión con ${s2}**: Él/Ella defendía el final feliz y el valor purificador de las emociones. Yo argumenté que el final parece excesivamente forzado, resolviendo todos los conflictos con demasiada conveniencia y dejando de lado la crudeza trágica que se venía construyendo con la figura de Carax.\n- **Debate con ${s1}**: Él/Ella sostenía que el melodrama es deliberado; yo mantuve que, aun si es una elección de género, le resta impacto de obra de arte seria y la acerca más a una novela comercial típica.\n\n## Ideas y Estructura para mi Reseña Final\n1. **Enfoque Crítico**: Escribir una reseña honesta y equilibrada que elogie el ritmo adictivo de la prosa de Zafón, pero que señale los fallos de coherencia y el abuso de los estereotipos de damiselas en apuros.\n2. **Sección Detallada**: Dedicar un párrafo a examinar los recursos narrativos facilones (como la extensa carta final de Nuria Monfort).\n3. **Cierre**: Valorar el libro como una excelente pieza de entretenimiento literario que, no obstante, no debe confundirse con una obra cumbre de la técnica narrativa.`
         },
         {
-          id: "Hablante 5 (El Bibliófilo)",
+          id: s5,
           voiceSnippet: "Para mí, el libro es ante todo un homenaje al objeto físico del libro y al noble oficio de los libreros y encuadernadores.",
           summary: "Yo centré mi intervención en la pasión por los libros que destila la obra. Resalté la relación entre Daniel y su padre, y la veneración del libro como un tesoro sagrado que conecta generaciones.",
-          notesMarkdown: `# Notas de Hablante 5 (El Bibliófilo)\n\n## Mis Impresiones y Pensamientos Clave (en primera persona)\n- **El Culto al Libro Físico**: Me conmovió la devoción de Daniel y su padre por los libros como objetos sagrados que contienen almas. Comparto plenamente la idea de que los libros guardan los pedazos de vida de quienes los leyeron.\n- **El Oficio del Librero**: Disfruté enormemente de los pasajes que describen el aroma a papel viejo, el proceso de encuadernación y las conversaciones entre los libreros en la trastienda. Me hizo valorar la mística de un comercio en peligro de extinción en nuestra sociedad digital.\n\n## Debates y Puntos de Vista con otros miembros\n- **Coincidencia con Hablante 2 (Lector Emocional)**: Coincidimos en que el Cementerio de los Libros Olvidados es un espacio mágico que todo lector sueña con visitar, un santuario de la imaginación humana.\n- **Discusión con Hablante 3 (Analista Histórico)**: Analizamos cómo la quema de los libros de Carax simboliza el control mental y la destrucción del libre pensamiento. Ambos estuvimos de acuerdo en que custodiar un libro prohibido es un acto supremo de valentía colectiva.\n\n## Ideas y Estructura para mi Reseña Final\n1. **Tema Central**: Enfocar la reseña como una apología del libro físico y de la lectura activa como un acto sagrado de memoria.\n2. **Estructura**: Dividir el texto analizando primero la simbología del 'Cementerio de los Libros', luego el rol del librero clásico frente al lector moderno, y terminar con un comentario sobre la metaliteratura en la obra.\n3. **Cita Clave**: Utilizar como encabezado la icónica cita del Cementerio de los Libros Olvidados.`
+          notesMarkdown: `# Notas de ${s5}\n\n## Mis Impresiones y Pensamientos Clave (en primera persona)\n- **El Culto al Libro Físico**: Me conmovió la devoción de Daniel y su padre por los libros como objetos sagrados que contienen almas. Comparto plenamente la idea de que los libros guardan los pedazos de vida de quienes los leyeron.\n- **El Oficio del Librero**: Disfruté enormemente de los pasajes que describen el aroma a papel viejo, el proceso de encuadernación y las conversaciones entre los libreros en la trastienda. Me hizo valorar la mística de un comercio en peligro de extinción en nuestra sociedad digital.\n\n## Debates y Puntos de Vista con otros miembros\n- **Coincidencia con ${s2}**: Coincidimos en que el Cementerio de los Libros Olvidados es un espacio mágico que todo lector sueña con visitar, un santuario de la imaginación humana.\n- **Discusión con ${s3}**: Analizamos cómo la quema de los libros de Carax simboliza el control mental y la destrucción del libre pensamiento. Ambos estuvimos de acuerdo en que custodiar un libro prohibido es un acto supremo de valentía colectiva.\n\n## Ideas y Estructura para mi Reseña Final\n1. **Tema Central**: Enfocar la reseña como una apología del libro físico y de la lectura activa como un acto sagrado de memoria.\n2. **Estructura**: Dividir el texto analizando primero la simbología del 'Cementerio de los Libros', luego el rol del librero clásico frente al lector moderno, y terminar con un comentario sobre la metaliteratura en la obra.\n3. **Cita Clave**: Utilizar como encabezado la icónica cita del Cementerio de los Libros Olvidados.`
         }
       ]
     };
@@ -388,7 +732,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
     setUploadedAudioUrl('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
     setStatus('success');
     setActiveTab('new');
-    setSelectedSpeakerId("Hablante 1 (El Crítico Literario)");
+    setSelectedSpeakerId(s1);
     setTargetBookId('');
   };
 
@@ -574,6 +918,13 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
             onClick={() => setActiveTab('history')}
           >
             Historial de Transcripciones
+          </button>
+          <button 
+            type="button" 
+            className={`voice-tab-btn ${activeTab === 'members' ? 'active' : ''}`}
+            onClick={() => setActiveTab('members')}
+          >
+            Miembros del Club
           </button>
         </div>
 
@@ -1053,7 +1404,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                 </div>
               ) : null}
             </>
-          ) : (
+          ) : activeTab === 'history' ? (
             /* History Tab */
             <div style={{ marginTop: '1rem' }}>
               <h4 className="serif-title" style={{ fontSize: '1.20rem', marginBottom: '1rem' }}>
@@ -1128,6 +1479,221 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Members Tab */
+            <div style={{ marginTop: '1rem' }}>
+              <h4 className="serif-title" style={{ fontSize: '1.20rem', marginBottom: '0.5rem' }}>
+                Registro de Miembros del Club
+              </h4>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+                Registra a los 5 participantes fijos del club. Graba una firma de voz de 10 segundos para cada uno para que la IA los identifique automáticamente en futuras transcripciones.
+              </p>
+
+              {loadingRegistry ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '3rem 0' }}>
+                  <Loader2 className="voice-spinner" size={24} />
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>Cargando miembros...</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                  {registry.map((speaker, idx) => {
+                    const isRec = isRecording && recordingSpeakerId === speaker.id;
+                    const hasVoice = speaker.audioUrl || speaker.audioBase64;
+                    const isSaving = savingSpeakerId === speaker.id;
+
+                    return (
+                      <div 
+                        key={speaker.id} 
+                        style={{
+                          background: 'var(--bg-card)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '1.25rem',
+                          boxShadow: 'var(--shadow-sm)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '1rem',
+                          textAlign: 'left'
+                        }}
+                      >
+                        {/* Header: Avatar and Name */}
+                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                          <div style={{
+                            width: '40px',
+                            height: '40px',
+                            borderRadius: '50%',
+                            background: 'var(--primary-glow)',
+                            color: 'var(--primary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0
+                          }}>
+                            <User size={20} />
+                          </div>
+                          
+                          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 'bold', margin: 0 }}>Nombre del Participante</label>
+                              <input 
+                                type="text"
+                                className="form-input"
+                                value={speaker.name || ''}
+                                onChange={(e) => handleUpdateSpeakerMeta(idx, 'name', e.target.value)}
+                                placeholder="Ej. Juan, Sofía..."
+                                style={{ fontSize: '0.9rem', padding: '0.4rem 0.6rem' }}
+                                disabled={isRec}
+                              />
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.25rem' }}>
+                              <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 'bold', margin: 0 }}>Perfil / Estilo Literario (Pistas para la IA)</label>
+                              <textarea 
+                                className="form-input"
+                                value={speaker.persona || ''}
+                                onChange={(e) => handleUpdateSpeakerMeta(idx, 'persona', e.target.value)}
+                                placeholder="Ej. Analiza aspectos de traducción, se enfoca en ritmo..."
+                                style={{ fontSize: '0.85rem', padding: '0.4rem 0.6rem', minHeight: '60px', resize: 'vertical' }}
+                                disabled={isRec}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Voice Signature Actions */}
+                        <div style={{
+                          borderTop: '1px solid var(--border)',
+                          paddingTop: '0.85rem',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          gap: '0.75rem'
+                        }}>
+                          {/* Left: Status Badges and Playback */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            {hasVoice ? (
+                              <>
+                                <span className="voice-badge-applied" style={{ background: 'var(--primary-glow)', color: 'var(--primary)', borderColor: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                                  <Check size={12} /> Firma registrada
+                                </span>
+                                <audio 
+                                  src={speaker.audioUrl || (speaker.audioBase64 ? `data:audio/webm;base64,${speaker.audioBase64}` : '')} 
+                                  controls 
+                                  style={{ height: '28px', maxWidth: '180px' }} 
+                                />
+                              </>
+                            ) : (
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                Sin firma de voz. Elige grabar abajo.
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Right: Mic Recording / Stop / Delete / Save Actions */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {isRec ? (
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={stopRecordingVoice}
+                                style={{
+                                  padding: '0.4rem 0.8rem',
+                                  fontSize: '0.8rem',
+                                  borderColor: 'var(--accent-coral)',
+                                  color: 'var(--accent-coral)',
+                                  background: 'rgba(250, 103, 129, 0.05)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem'
+                                }}
+                              >
+                                <Square size={12} fill="var(--accent-coral)" /> Parar ({recordCountdown}s)
+                              </button>
+                            ) : (
+                              <>
+                                <input 
+                                  type="file" 
+                                  accept="audio/*" 
+                                  id={`file-upload-${speaker.id}`} 
+                                  style={{ display: 'none' }} 
+                                  onChange={(e) => handleUploadVoiceprintFile(speaker.id, e)} 
+                                />
+                                <button 
+                                  type="button" 
+                                  className="btn btn-secondary"
+                                  onClick={() => document.getElementById(`file-upload-${speaker.id}`).click()}
+                                  disabled={isRecording || isSaving}
+                                  style={{
+                                    padding: '0.4rem 0.8rem',
+                                    fontSize: '0.8rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem'
+                                  }}
+                                  title="Subir archivo de audio como firma de voz"
+                                >
+                                  <FileUp size={12} /> Subir Audio
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  onClick={() => startRecordingVoice(speaker.id)}
+                                  disabled={isRecording || isSaving}
+                                  style={{
+                                    padding: '0.4rem 0.8rem',
+                                    fontSize: '0.8rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem'
+                                  }}
+                                >
+                                  <Mic size={12} /> Grabar Voz
+                                </button>
+                              </>
+                            )}
+
+                            {hasVoice && (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-icon"
+                                onClick={() => handleDeleteVoiceprint(speaker.id)}
+                                disabled={isRec || isRecording}
+                                style={{ padding: '0.4rem', height: 'auto', borderColor: 'var(--border)' }}
+                                title="Eliminar firma de voz"
+                              >
+                                <Trash2 size={12} style={{ color: 'var(--accent-coral)' }} />
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              onClick={() => handleSaveSpeakerProfile(idx)}
+                              disabled={isRec || isSaving}
+                              style={{
+                                padding: '0.4rem 0.8rem',
+                                fontSize: '0.8rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.35rem'
+                              }}
+                            >
+                              {isSaving ? (
+                                <Loader2 className="voice-spinner" size={12} />
+                              ) : (
+                                <Save size={12} />
+                              )}
+                              Guardar
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
