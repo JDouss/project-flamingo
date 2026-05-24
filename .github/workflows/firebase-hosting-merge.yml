@@ -30,6 +30,7 @@ jobs:
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
           VITE_ADMIN_EMAIL: ${{ secrets.VITE_ADMIN_EMAIL }}
           VITE_AUTHORIZED_EMAILS: ${{ secrets.VITE_AUTHORIZED_EMAILS }}
+          VITE_GCP_API_KEY: ${{ secrets.VITE_GCP_API_KEY }}
 
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0

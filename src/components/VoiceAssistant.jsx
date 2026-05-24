@@ -587,12 +587,12 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
           const gcsUri = `gs://${bucketName}/${filePath}`;
           console.log("Speech-to-Text GCS URI:", gcsUri);
 
-          // Get Firebase API key to use for GCP STT
-          const firebaseApiKey = import.meta.env.VITE_FIREBASE_API_KEY || "";
+          // Get GCP API key specifically for Speech-to-Text, falling back to Firebase API key
+          const gcpApiKey = import.meta.env.VITE_GCP_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY || "";
 
           // Call Speech-to-Text API longrunningrecognize
           const sttRes = await fetch(
-            `https://speech.googleapis.com/v1/speech:longrunningrecognize?key=${firebaseApiKey.trim()}`,
+            `https://speech.googleapis.com/v1/speech:longrunningrecognize?key=${gcpApiKey.trim()}`,
             {
               method: 'POST',
               headers: {
@@ -636,7 +636,7 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
             attempts++;
             setProgressMsg(`Transcribiendo en GCP STT... (${attempts * pollInterval / 1000}s)`);
 
-            const opRes = await fetch(`https://speech.googleapis.com/v1/${operationName}?key=${firebaseApiKey.trim()}`);
+            const opRes = await fetch(`https://speech.googleapis.com/v1/${operationName}?key=${gcpApiKey.trim()}`);
             if (!opRes.ok) {
               throw new Error(`Error al verificar operación STT (${opRes.status})`);
             }
