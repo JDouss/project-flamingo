@@ -814,7 +814,11 @@ Devuelve únicamente el texto de la transcripción, sin ningún formato adiciona
 
     } catch (err) {
       console.error('Audio processing error:', err);
-      setErrorMsg(err.message || 'Ocurrió un error al procesar el audio.');
+      let msg = err.message || 'Ocurrió un error al procesar el audio.';
+      if (msg.includes('blocked') || msg.includes('GenerativeService') || msg.includes('API key')) {
+        msg = `La clave API está bloqueada o restringida: ${msg}. Por favor, ve a Google Cloud Console -> 'APIs y servicios' -> 'Credenciales', edita tu clave API y comprueba que no tenga restricciones que bloqueen 'Generative Language API'.`;
+      }
+      setErrorMsg(msg);
       setStatus('error');
     }
   };
@@ -975,7 +979,11 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
       await saveTranscription(parsedResult, uploadedAudioUrl, mappedTranscript);
     } catch (err) {
       console.error('Final analysis processing error:', err);
-      setErrorMsg(err.message || 'Ocurrió un error al generar el análisis final de la sesión.');
+      let msg = err.message || 'Ocurrió un error al generar el análisis final de la sesión.';
+      if (msg.includes('blocked') || msg.includes('GenerativeService') || msg.includes('API key')) {
+        msg = `La clave API está bloqueada o restringida: ${msg}. Por favor, ve a Google Cloud Console -> 'APIs y servicios' -> 'Credenciales', edita tu clave API y comprueba que no tenga restricciones que bloqueen 'Generative Language API'.`;
+      }
+      setErrorMsg(msg);
       setStatus('error');
     }
   };
@@ -1179,7 +1187,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
         <div className="voice-assistant-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Sparkles size={20} style={{ color: 'var(--primary)' }} />
-            <h3 className="serif-title" style={{ fontSize: '1.4rem', margin: 0 }}>Asistente de notas de voz</h3>
+            <h3 className="serif-title" style={{ fontSize: '1.4rem', margin: 0 }}>Sesiones del Club de Lectura</h3>
           </div>
           <button className="voice-close-btn" onClick={onClose}>
             <X size={16} />
@@ -1193,14 +1201,14 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
             className={`voice-tab-btn ${activeTab === 'new' ? 'active' : ''}`}
             onClick={() => setActiveTab('new')}
           >
-            Nueva Transcripción
+            Añadir nueva sesión
           </button>
           <button 
             type="button" 
             className={`voice-tab-btn ${activeTab === 'history' ? 'active' : ''}`}
             onClick={() => setActiveTab('history')}
           >
-            Historial de Transcripciones
+            Historial de sesiones
           </button>
           <button 
             type="button" 
@@ -1838,7 +1846,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
             /* History Tab */
             <div style={{ marginTop: '1rem' }}>
               <h4 className="serif-title" style={{ fontSize: '1.20rem', marginBottom: '1rem' }}>
-                Historial de Transcripciones
+                Historial de Sesiones
               </h4>
               {isDemoMode && (
                 <p style={{ fontSize: '0.75rem', color: '#fbbf24', marginBottom: '1rem', fontStyle: 'italic' }}>

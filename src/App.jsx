@@ -314,7 +314,7 @@ export default function App() {
                   <UserCheck size={14} className="star-filled" /> Administrador Activo
                 </span>
                 <button className="btn btn-secondary" onClick={() => setIsGeneralVoiceOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <Volume2 size={16} /> Grabaciones y Voz
+                  <Volume2 size={16} /> Añadir Sesión del Club
                 </button>
                 <button className="btn btn-primary" onClick={startAdd}>
                   <Plus size={16} /> Añadir Reseña
