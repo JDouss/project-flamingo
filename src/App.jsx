@@ -111,17 +111,24 @@ export default function App() {
   const [sortBy, setSortBy] = useState('newest');
 
   // Verify Firebase credentials are present, otherwise activate Demo Mode
-  const hasFirebaseConfig = 
+  const hasFirebaseConfig = !!(
     import.meta.env.VITE_FIREBASE_API_KEY && 
-    import.meta.env.VITE_FIREBASE_API_KEY !== 'your_api_key_here';
+    import.meta.env.VITE_FIREBASE_API_KEY !== 'your_api_key_here' &&
+    auth &&
+    db
+  );
 
   // 1. Auth Listener
   useEffect(() => {
+    if (!auth) {
+      setUser(null);
+      return;
+    }
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         // Double check admin email restrictions
         if (adminEmail && currentUser.email !== adminEmail) {
-          signOut(auth);
+          signOut(auth).catch(err => console.error(err));
           setUser(null);
         } else {
           setUser(currentUser);
@@ -135,8 +142,8 @@ export default function App() {
 
   // 2. Fetch Books (Firestore or Demo Fallback)
   useEffect(() => {
-    if (!hasFirebaseConfig) {
-      console.warn("Firebase configuration not found. Running in Demo Mode.");
+    if (!hasFirebaseConfig || !db) {
+      console.warn("Firebase configuration not found or database not initialized. Running in Demo Mode.");
       setBooks(MOCK_BOOKS);
       setIsDemoMode(true);
       setLoading(false);
@@ -166,6 +173,7 @@ export default function App() {
 
   // Log out handler
   const handleLogout = async () => {
+    if (!auth) return;
     try {
       await signOut(auth);
     } catch (err) {

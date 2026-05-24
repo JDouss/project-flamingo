@@ -16,6 +16,9 @@ export default function LoginModal({ isOpen, onClose }) {
     setError('');
     setLoading(true);
     try {
+      if (!auth || !googleProvider) {
+        throw new Error('La autenticación de Firebase no está configurada o falló al inicializarse.');
+      }
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       
@@ -39,6 +42,9 @@ export default function LoginModal({ isOpen, onClose }) {
     setError('');
     setLoading(true);
     try {
+      if (!auth) {
+        throw new Error('La autenticación de Firebase no está configurada o falló al inicializarse.');
+      }
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
