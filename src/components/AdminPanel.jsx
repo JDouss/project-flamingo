@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db, storage } from '../firebase';
-import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, getDocs } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { X, Plus, Trash2, UploadCloud, BookOpen, Save, Link, Quote, Star, Sparkles, Maximize2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -40,6 +40,74 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
 
   const handleApplyVoiceNotes = (notesMarkdown) => {
     setPrivateNotes(notesMarkdown);
+  };
+
+  const [sessionDrafts, setSessionDrafts] = useState([]);
+  const [loadingDrafts, setLoadingDrafts] = useState(false);
+  const [showDraftSelector, setShowDraftSelector] = useState(false);
+  const [selectedDraftId, setSelectedDraftId] = useState('');
+  const [selectedAttendeeName, setSelectedAttendeeName] = useState('');
+
+  const fetchSessionDrafts = async () => {
+    setLoadingDrafts(true);
+    try {
+      let list = [];
+      if (!isDemoMode) {
+        // Fetch from Firestore
+        const querySnapshot = await getDocs(collection(db, 'transcriptions'));
+        list = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+      } else {
+        // Fetch from LocalStorage
+        list = JSON.parse(localStorage.getItem('flamingo_transcription_history') || '[]');
+      }
+      
+      // Sort by date descending
+      list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      setSessionDrafts(list);
+    } catch (err) {
+      console.error("Error al cargar borradores de sesión:", err);
+    } finally {
+      setLoadingDrafts(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchSessionDrafts();
+    }
+  }, [isOpen]);
+
+  const handleImportSessionDraft = () => {
+    if (!selectedDraftId) return;
+    const session = sessionDrafts.find(d => d.id === selectedDraftId || d.createdAt === selectedDraftId);
+    if (!session) return;
+    
+    const attendees = session.speakers || session.attendees || [];
+    const attendee = attendees.find(a => a.name === selectedAttendeeName || a.id === selectedAttendeeName);
+    
+    if (attendee) {
+      setPrivateNotes(attendee.notesMarkdown || '');
+      setSummary(attendee.summary || session.generalSummary || '');
+      
+      if (session.bookId && session.bookId !== 'new_book') {
+        const matchingBook = books.find(b => b.id === session.bookId);
+        if (matchingBook) {
+          setTitle(matchingBook.title || '');
+          setAuthor(matchingBook.author || '');
+          setGenre(matchingBook.genre || '');
+        }
+      }
+      
+      alert(`Borrador de sesión cargado con éxito para ${selectedAttendeeName}. Las notas privadas y el resumen han sido actualizados.`);
+      setShowDraftSelector(false);
+      setSelectedDraftId('');
+      setSelectedAttendeeName('');
+    } else {
+      alert("No se pudo encontrar las notas para el miembro seleccionado en esta sesión.");
+    }
   };
 
   // Load existing book data for editing
@@ -323,6 +391,104 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
           )}
 
           <form onSubmit={handleSubmit} id="admin-book-form">
+            {/* Session Draft Loading Section */}
+            <div style={{
+              background: 'rgba(89, 178, 146, 0.05)',
+              border: '1px solid rgba(89, 178, 146, 0.2)',
+              borderRadius: 'var(--radius-md)',
+              padding: '1.25rem',
+              marginBottom: '1.5rem',
+              textAlign: 'left'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Sparkles size={16} style={{ color: 'var(--primary)' }} />
+                  <span style={{ fontWeight: '700', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                    Cargar reseña desde Sesión del Club
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: 'auto' }}
+                  onClick={() => {
+                    setShowDraftSelector(!showDraftSelector);
+                    if (!showDraftSelector) {
+                      fetchSessionDrafts();
+                    }
+                  }}
+                >
+                  {showDraftSelector ? 'Ocultar' : 'Cargar desde Sesión'}
+                </button>
+              </div>
+
+              {showDraftSelector && (
+                <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {loadingDrafts ? (
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Cargando sesiones pasadas...</p>
+                  ) : sessionDrafts.length === 0 ? (
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No se encontraron sesiones previas en el historial.</p>
+                  ) : (
+                    <>
+                      <div className="form-group">
+                        <label className="form-label" style={{ fontSize: '0.8rem' }}>Seleccionar Sesión de Grabación:</label>
+                        <select
+                          className="form-select"
+                          value={selectedDraftId}
+                          onChange={(e) => {
+                            setSelectedDraftId(e.target.value);
+                            setSelectedAttendeeName('');
+                          }}
+                          style={{ width: '100%', fontSize: '0.85rem', background: 'var(--bg-card)', color: 'var(--text-primary)', borderColor: 'var(--border)' }}
+                        >
+                          <option value="">-- Seleccionar sesión --</option>
+                          {sessionDrafts.map((d) => (
+                            <option key={d.id || d.createdAt} value={d.id || d.createdAt}>
+                              {d.audioName} ({new Date(d.createdAt).toLocaleDateString('es-ES')})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {selectedDraftId && (
+                        <div className="form-group">
+                          <label className="form-label" style={{ fontSize: '0.8rem' }}>¿Quién eres tú en esta sesión?</label>
+                          <select
+                            className="form-select"
+                            value={selectedAttendeeName}
+                            onChange={(e) => setSelectedAttendeeName(e.target.value)}
+                            style={{ width: '100%', fontSize: '0.85rem', background: 'var(--bg-card)', color: 'var(--text-primary)', borderColor: 'var(--border)' }}
+                          >
+                            <option value="">-- Seleccionar participante --</option>
+                            {(() => {
+                              const session = sessionDrafts.find(d => d.id === selectedDraftId || d.createdAt === selectedDraftId);
+                              const attendees = session ? (session.speakers || session.attendees || []) : [];
+                              return attendees.map((a) => (
+                                <option key={a.name || a.id} value={a.name || a.id}>
+                                  {a.name || a.id}
+                                </option>
+                              ));
+                            })()}
+                          </select>
+                        </div>
+                      )}
+
+                      {selectedDraftId && selectedAttendeeName && (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={handleImportSessionDraft}
+                          style={{ width: '100%', fontSize: '0.85rem', display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
+                        >
+                          <Sparkles size={14} /> Cargar Datos en Formulario
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="form-group">
               <label className="form-label">Título del libro *</label>
               <input
