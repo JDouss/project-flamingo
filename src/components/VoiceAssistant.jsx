@@ -7,11 +7,11 @@ import { renderMarkdown } from '../utils/markdown';
 
 export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMode, bookId, books = [], onApplyNotesToBook }) {
   const [apiKey, setApiKey] = useState(() => {
-    return localStorage.getItem('flamingo_gemini_api_key') || '';
+    return import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY || localStorage.getItem('flamingo_gemini_api_key') || '';
   });
   const [saveKey, setSaveKey] = useState(true);
   const [showKeyInput, setShowKeyInput] = useState(() => {
-    return !localStorage.getItem('flamingo_gemini_api_key');
+    return !(import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY || localStorage.getItem('flamingo_gemini_api_key'));
   });
   
   // File state
