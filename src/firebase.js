@@ -43,3 +43,8 @@ if (hasConfig) {
 export { db, storage, auth, googleProvider };
 export const adminEmail = import.meta.env.VITE_ADMIN_EMAIL || "doussinague95@gmail.com";
 
+const authorizedEmailsEnv = import.meta.env.VITE_AUTHORIZED_EMAILS || "";
+export const authorizedEmails = authorizedEmailsEnv
+  ? authorizedEmailsEnv.split(',').map(e => e.trim().toLowerCase())
+  : [adminEmail.toLowerCase()];
+

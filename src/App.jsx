@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { db, auth, adminEmail } from './firebase';
+import { db, auth, adminEmail, authorizedEmails } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { 
@@ -127,7 +127,9 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         // Double check admin email restrictions
-        if (adminEmail && currentUser.email !== adminEmail) {
+        const emailLower = currentUser.email ? currentUser.email.toLowerCase() : '';
+        const isAuthorized = authorizedEmails.includes(emailLower);
+        if (!isAuthorized) {
           signOut(auth).catch(err => console.error(err));
           setUser(null);
         } else {

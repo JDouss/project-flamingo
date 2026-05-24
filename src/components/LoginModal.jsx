@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { auth, googleProvider, adminEmail } from '../firebase';
+import { auth, googleProvider, adminEmail, authorizedEmails } from '../firebase';
 import { signInWithPopup, signInWithEmailAndPassword } from 'firebase/auth';
 import { X, LogIn, Mail, Lock, ShieldAlert } from 'lucide-react';
 
@@ -23,10 +23,11 @@ export default function LoginModal({ isOpen, onClose }) {
       const user = result.user;
       
       // If VITE_ADMIN_EMAIL is set, enforce authorization checks on the client side
-      if (adminEmail && user.email !== adminEmail) {
+      const emailLower = user.email ? user.email.toLowerCase() : '';
+      if (!authorizedEmails.includes(emailLower)) {
         // Sign out automatically if not authorized
         await auth.signOut();
-        throw new Error(`No autorizado. Solo ${adminEmail} tiene permitido iniciar sesión.`);
+        throw new Error(`No autorizado. Tu correo no está en la lista de miembros autorizados del club.`);
       }
       onClose();
     } catch (err) {
@@ -48,9 +49,10 @@ export default function LoginModal({ isOpen, onClose }) {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
-      if (adminEmail && user.email !== adminEmail) {
+      const emailLower = user.email ? user.email.toLowerCase() : '';
+      if (!authorizedEmails.includes(emailLower)) {
         await auth.signOut();
-        throw new Error(`No autorizado. Solo ${adminEmail} tiene permitido iniciar sesión.`);
+        throw new Error(`No autorizado. Tu correo no está en la lista de miembros autorizados del club.`);
       }
       onClose();
     } catch (err) {
