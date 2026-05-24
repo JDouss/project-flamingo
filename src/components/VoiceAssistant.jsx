@@ -558,6 +558,150 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
         });
       };
 
+      // 1.5. GCP Speech-to-Text Diarization (Optional Fallback)
+      let gcpDiarizedTranscript = "";
+      let useGcpSst = false;
+
+      if (!isDemoMode && audioUrl.startsWith('https://firebasestorage.googleapis.com')) {
+        try {
+          setStatus('analyzing');
+          setProgressMsg('Iniciando transcripción con GCP Speech-to-Text API (Diarization)...');
+          
+          // Construct GCS URI
+          const bucketName = import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "project-flamingo-497112.firebasestorage.app";
+          let filePath = "";
+          try {
+            const urlObj = new URL(audioUrl);
+            const pathParts = urlObj.pathname.split('/o/');
+            if (pathParts.length > 1) {
+              filePath = decodeURIComponent(pathParts[1].split('?')[0]);
+            }
+          } catch (e) {
+            console.warn("Failed to parse file path from URL:", e);
+          }
+
+          if (!filePath) {
+            filePath = `recordings/${audioFile.name}`;
+          }
+
+          const gcsUri = `gs://${bucketName}/${filePath}`;
+          console.log("Speech-to-Text GCS URI:", gcsUri);
+
+          // Get Firebase API key to use for GCP STT
+          const firebaseApiKey = import.meta.env.VITE_FIREBASE_API_KEY || "";
+
+          // Call Speech-to-Text API longrunningrecognize
+          const sttRes = await fetch(
+            `https://speech.googleapis.com/v1/speech:longrunningrecognize?key=${firebaseApiKey.trim()}`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                config: {
+                  languageCode: "es-ES",
+                  enableSpeakerDiarization: true,
+                  diarizationConfig: {
+                    enableSpeakerDiarization: true,
+                    minSpeakerCount: 2,
+                    maxSpeakerCount: 5
+                  }
+                },
+                audio: {
+                  uri: gcsUri
+                }
+              })
+            }
+          );
+
+          if (!sttRes.ok) {
+            const sttErr = await sttRes.json().catch(() => ({}));
+            throw new Error(sttErr?.error?.message || `GCP STT status ${sttRes.status}`);
+          }
+
+          const sttOp = await sttRes.json();
+          const operationName = sttOp.name;
+          console.log("GCP STT Operation started:", operationName);
+
+          // Poll operation
+          let done = false;
+          let responseData = null;
+          const pollInterval = 5000;
+          const maxAttempts = 60; // 5 mins
+          let attempts = 0;
+
+          while (!done && attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
+            attempts++;
+            setProgressMsg(`Transcribiendo en GCP STT... (${attempts * pollInterval / 1000}s)`);
+
+            const opRes = await fetch(`https://speech.googleapis.com/v1/${operationName}?key=${firebaseApiKey.trim()}`);
+            if (!opRes.ok) {
+              throw new Error(`Error al verificar operación STT (${opRes.status})`);
+            }
+            responseData = await opRes.json();
+            if (responseData.done) {
+              done = true;
+            }
+          }
+
+          if (!done) {
+            throw new Error("La operación de transcripción de GCP STT expiró.");
+          }
+
+          if (responseData.error) {
+            throw new Error(`Error en GCP STT: ${responseData.error.message}`);
+          }
+
+          // Parse words and reconstruct transcript
+          const results = responseData.response?.results || [];
+          const words = [];
+          results.forEach(r => {
+            const alt = r.alternatives?.[0];
+            if (alt && alt.words) {
+              words.push(...alt.words);
+            }
+          });
+
+          if (words.length > 0) {
+            let currentSpeaker = null;
+            let currentLine = "";
+            const dialogLines = [];
+
+            words.forEach(w => {
+              const speaker = w.speakerTag;
+              const word = w.word;
+              
+              if (currentSpeaker === null) {
+                currentSpeaker = speaker;
+                currentLine = word;
+              } else if (currentSpeaker === speaker) {
+                currentLine += " " + word;
+              } else {
+                dialogLines.push(`[Speaker ${currentSpeaker}]: ${currentLine}`);
+                currentSpeaker = speaker;
+                currentLine = word;
+              }
+            });
+
+            if (currentSpeaker !== null) {
+              dialogLines.push(`[Speaker ${currentSpeaker}]: ${currentLine}`);
+            }
+
+            gcpDiarizedTranscript = dialogLines.join('\n');
+            useGcpSst = true;
+            console.log("Reconstructed GCP Diarized Transcript:", gcpDiarizedTranscript);
+          } else {
+            console.warn("GCP STT completed but returned no words.");
+          }
+        } catch (sttError) {
+          console.error("GCP Speech-to-Text failed, falling back to direct Gemini audio transcription:", sttError);
+          setProgressMsg(`GCP STT no disponible. Continuando con transcripción directa en Gemini...`);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+      }
+
       // 2. Load and prepare speaker voiceprints
       setStatus('analyzing');
       setProgressMsg('Preparando firmas de voz de referencia...');
@@ -603,7 +747,53 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
         ? 'Detecta automáticamente el número de hablantes participando en la conversación.'
         : `El número esperado de hablantes es exactamente ${expectedSpeakers}.`;
 
-      const prompt = `
+      let prompt = "";
+      if (useGcpSst) {
+        prompt = `
+Eres un secretario experto y analista de clubes de lectura.
+Analiza la siguiente transcripción estructurada que ha sido generada por un sistema de diarización acústica de GCP (separación de voces). Las voces están etiquetadas provisionalmente en el borrador como "[Speaker 1]", "[Speaker 2]", etc.
+
+Borrador de Transcripción de la Reunión:
+"""
+${gcpDiarizedTranscript}
+"""
+
+El último archivo de audio adjunto es la grabación de la reunión completa.
+Los archivos de audio anteriores son firmas de voz de referencia de los miembros registrados, cada uno con una descripción de su nombre y perfil.
+
+Instrucciones de análisis:
+1. Compara acústicamente (timbre, tono, ritmo) las firmas de voz con las voces del audio de la reunión principal y lee con atención el contenido de la transcripción para asociar de manera precisa cada etiqueta provisional "[Speaker X]" al NOMBRE REAL del miembro del club correspondiente: Jaime, Almu, Alejandro, Joaquin o Zepe.
+2. Si un participante se asemeja al estilo literario y a la firma de voz de un miembro registrado, asócialo a su NOMBRE REAL.
+3. Si hay algún participante que no coincide con ninguna firma de voz, etiquétalo como "Invitado [Número]" (ej. "Invitado 1").
+4. El número esperado de hablantes es exactamente el número de speakers detectados en la diarización.
+
+Debes devolver tu respuesta estrictamente en formato JSON con la siguiente estructura exacta:
+{
+  "speakers": [
+    {
+      "id": "Nombre del Miembro" (ej. "Jaime", "Almu", etc. mapeado del Speaker X correspondiente),
+      "voiceSnippet": "Una cita directa de 1 frase dicha por este hablante que destaque su perspectiva o estilo de habla en español.",
+      "summary": "Un resumen de 2 o 3 frases de las opiniones principales de este hablante, redactado estrictamente en primera persona singular (ej. 'Yo opiné que...', 'Pienso que...').",
+      "notesMarkdown": "Un documento detallado y extenso en Markdown (mínimo 200-300 palabras si el audio lo permite) que sirva como Notas Preliminares Privadas muy profundas para recordar mis pensamientos durante la lectura y discusión. Debe capturar toda mi perspectiva como hablante, pensamientos íntimos sobre la lectura, aportaciones e hipótesis discutidas, así como puntos clave de debate, acuerdos o desacuerdos profundos que mantuve con los otros participantes. Debe organizarse obligatoriamente con el siguiente esquema:
+
+# Notas preliminares de [Nombre del Hablante]
+## Mis Impresiones y Pensamientos Clave (en primera persona)
+- Detallar lo que yo pensé o sentí durante la lectura y qué partes me impactaron más.
+## Debates y Puntos de Vista con otros miembros
+- Registrar qué puntos de vista defendieron otros hablantes y en qué estuve de acuerdo o en desacuerdo, detallando la discusión.
+## Ideas y Estructura para mi Reseña Final
+- Mis conclusiones principales y cómo planeo estructurar mis argumentos para la reseña final.
+
+Regla de oro: Escribe esto de manera detallada y rica en información, usando viñetas y texto en negrita, todo estrictamente en primera persona singular ('yo', 'mis notas', 'discutí', 'me pareció')."
+    }
+  ]
+}
+
+REGLA CRÍTICA DE REDACCIÓN: Tanto el "summary" como el "notesMarkdown" de CADA hablante deben redactarse como si fuera la propia persona escribiendo en primera persona singular ("yo", "me pareció", "sugerí", "mis notas"). Está estrictamente prohibido usar la tercera persona (por ejemplo, NO escribas "El hablante piensa...", "Juan mencionó...").
+Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente escapado dentro del JSON. Todo el contenido generado DEBE estar en español. No incluyes ningún envoltorio de markdown como \`\`\`json. Devuelve únicamente el JSON crudo.
+`;
+      } else {
+        prompt = `
 Eres un secretario experto y analista de clubes de lectura.
 Analiza el último archivo de audio adjunto, el cual es la grabación de una reunión de club de lectura en español.
 Los archivos de audio anteriores son firmas de voz de referencia de los miembros registrados, cada uno con una descripción de su nombre y perfil.
@@ -611,7 +801,7 @@ Los archivos de audio anteriores son firmas de voz de referencia de los miembros
 Instrucciones de análisis:
 1. Realiza la diarización de los hablantes en la grabación de la reunión principal.
 2. Compara acústicamente (timbre, tono, ritmo) las voces de la reunión con las firmas de voz de referencia provistas para identificar a qué miembro corresponde cada voz de la reunión.
-3. Si un participante se asemeja al estilo literario y a la firma de voz de un miembro registrado, identifícalo con su NOMBRE REAL en el campo "id".
+3. Si un participante se asemeja al estilo literario y a la firma de voz de un miembro registrado, identifícalo con su NOMBRE REAL en el campo "id" (Jaime, Almu, Alejandro, Joaquin o Zepe).
 4. Si hay algún participante que no coincide con ninguna firma de voz, etiquétalo como "Invitado [Número]" (ej. "Invitado 1").
 5. ${expectedSpeakersConstraint}
 
@@ -622,7 +812,17 @@ Debes devolver tu respuesta estrictamente en formato JSON con la siguiente estru
       "id": "Nombre del Miembro" (ej. "Juan", "Sofía" o "Invitado 1"),
       "voiceSnippet": "Una cita directa de 1 frase dicha por este hablante que destaque su perspectiva o estilo de habla en español (ej. 'Yo considero que el final fue muy triste pero necesario.')",
       "summary": "Un resumen de 2 o 3 frases de las opiniones principales de este hablante y sus ideas generales sobre el libro, redactado estrictamente en primera persona singular (ej. 'Yo opiné que...', 'Pienso que...'). No uses la tercera persona.",
-      "notesMarkdown": "Un documento detallado y extenso en Markdown (mínimo 200-300 palabras si el audio lo permite) que sirva como Notas Preliminares Privadas muy profundas para recordar mis pensamientos durante la lectura y discusión. Debe capturar toda mi perspectiva como hablante, pensamientos íntimos sobre la lectura, aportaciones e hipótesis discutidas, así como puntos clave de debate, acuerdos o desacuerdos profundos que mantuve con los otros participantes. Debe organizarse obligatoriamente con el siguiente esquema:\n\n# Notas preliminares de [Nombre del Hablante]\n## Mis Impresiones y Pensamientos Clave (en primera persona)\n- Detallar lo que yo pensé o sentí durante la lectura y qué partes me impactaron más.\n## Debates y Puntos de Vista con otros miembros\n- Registrar qué puntos de vista defendieron otros hablantes y en qué estuve de acuerdo o en desacuerdo, detallando la discusión.\n## Ideas y Estructura para mi Reseña Final\n- Mis conclusiones principales y cómo planeo estructurar mis argumentos para la reseña final.\n\nRegla de oro: Escribe esto de manera detallada y rica en información, usando viñetas y texto en negrita, todo estrictamente en primera persona singular ('yo', 'mis notas', 'discutí', 'me pareció')."
+      "notesMarkdown": "Un documento detallado y extenso en Markdown (mínimo 200-300 palabras si el audio lo permite) que sirva como Notas Preliminares Privadas muy profundas para recordar mis pensamientos durante la lectura y discusión. Debe capturar toda mi perspectiva como hablante, pensamientos íntimos sobre la lectura, aportaciones e hipótesis discutidas, así como puntos clave de debate, acuerdos o desacuerdos profundos que mantuve con los otros participantes. Debe organizarse obligatoriamente con el siguiente esquema:
+
+# Notas preliminares de [Nombre del Hablante]
+## Mis Impresiones y Pensamientos Clave (en primera persona)
+- Detallar lo que yo pensé o sentí durante la lectura y qué partes me impactaron más.
+## Debates y Puntos de Vista con otros miembros
+- Registrar qué puntos de vista defendieron otros hablantes y en qué estuve de acuerdo o en desacuerdo, detallando la discusión.
+## Ideas y Estructura para mi Reseña Final
+- Mis conclusiones principales y cómo planeo estructurar mis argumentos para la reseña final.
+
+Regla de oro: Escribe esto de manera detallada y rica en información, usando viñetas y texto en negrita, todo estrictamente en primera persona singular ('yo', 'mis notas', 'discutí', 'me pareció')."
     }
   ]
 }
@@ -630,6 +830,7 @@ Debes devolver tu respuesta estrictamente en formato JSON con la siguiente estru
 REGLA CRÍTICA DE REDACCIÓN: Tanto el "summary" como el "notesMarkdown" de CADA hablante deben redactarse como si fuera la propia persona escribiendo en primera persona singular ("yo", "me pareció", "sugerí", "mis notas"). Está estrictamente prohibido usar la tercera persona (por ejemplo, NO escribas "El hablante piensa...", "Juan mencionó...").
 Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente escapado dentro del JSON. Todo el contenido generado DEBE estar en español. No incluyas ningún envoltorio de markdown como \`\`\`json. Devuelve únicamente el JSON crudo.
 `;
+      }
 
       const requestParts = [...referenceParts, mainAudioPart, { text: prompt }];
 
