@@ -8,7 +8,19 @@
     <title>Flamingo Reviews | Mi Sala de Lectura Personal</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;color:#19191d">
+        <div style="width:40px;height:40px;border:3px solid #ebd9bf;border-top:3px solid #59b292;border-radius:50%;animation:spin 1s linear infinite"></div>
+        <p style="margin-top:1rem;color:#6e6e76">Cargando Flamingo...</p>
+      </div>
+      <style>@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}</style>
+    </div>
+    <noscript>
+      <div style="padding:2rem;text-align:center;font-family:sans-serif">
+        <h1>JavaScript requerido</h1>
+        <p>Esta aplicación necesita JavaScript para funcionar. Por favor, habilítalo en tu navegador.</p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
