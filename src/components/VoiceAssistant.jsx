@@ -610,7 +610,6 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
               body: JSON.stringify({
                 config: {
                   languageCode: "es-ES",
-                  enableSpeakerDiarization: true,
                   diarizationConfig: {
                     enableSpeakerDiarization: true,
                     minSpeakerCount: 2,
