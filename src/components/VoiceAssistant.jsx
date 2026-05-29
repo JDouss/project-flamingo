@@ -666,12 +666,25 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
           // Parse words and reconstruct transcript
           const results = responseData.response?.results || [];
           const words = [];
-          results.forEach(r => {
-            const alt = r.alternatives?.[0];
-            if (alt && alt.words) {
-              words.push(...alt.words);
+          if (results.length > 0) {
+            // In GCP STT v1 with diarization, the last result's last alternative contains all words with speaker tags
+            const lastResult = results[results.length - 1];
+            const lastAlt = lastResult.alternatives?.[lastResult.alternatives.length - 1] || lastResult.alternatives?.[0];
+            if (lastAlt && lastAlt.words && lastAlt.words.length > 0) {
+              console.log("Extracting speaker-diarized words from the last alternative of the last result");
+              words.push(...lastAlt.words);
+            } else {
+              // Fallback: concatenate words from all results if the last result does not have words
+              console.log("Last alternative did not contain words, falling back to concatenating all results");
+              results.forEach(r => {
+                const alt = r.alternatives?.[0];
+                if (alt && alt.words) {
+                  words.push(...alt.words);
+                }
+              });
             }
-          });
+          }
+
 
           if (words.length > 0) {
             let currentSpeaker = null;
