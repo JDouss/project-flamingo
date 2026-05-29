@@ -567,11 +567,11 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
         });
       };
 
-      // 1.5. GCP Speech-to-Text Diarization (Optional Fallback)
+      // 1.5. GCP Speech-to-Text Diarization (Strict mode in production, Gemini only in demo mode)
       let gcpDiarizedTranscript = "";
       let useGcpSst = false;
 
-      if (!isDemoMode && audioUrl.startsWith('https://firebasestorage.googleapis.com')) {
+      if (!isDemoMode) {
         try {
           setStatus('analyzing');
           setProgressMsg('Iniciando transcripción con GCP Speech-to-Text API (Diarization)...');
@@ -699,7 +699,6 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
             }
           }
 
-
           if (words.length > 0) {
             let currentSpeaker = null;
             let currentLine = "";
@@ -729,16 +728,15 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
             useGcpSst = true;
             console.log("Reconstructed GCP Diarized Transcript:", gcpDiarizedTranscript);
           } else {
-            console.warn("GCP STT completed but returned no words.");
+            throw new Error("GCP STT se completó pero no devolvió ninguna palabra.");
           }
         } catch (sttError) {
-          console.error("GCP Speech-to-Text failed, falling back to direct Gemini audio transcription:", sttError);
-          setProgressMsg(`GCP STT no disponible. Continuando con transcripción directa en Gemini...`);
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          console.error("GCP Speech-to-Text failed:", sttError);
+          throw new Error(`Error en transcripción GCP Speech-to-Text: ${sttError.message}`);
         }
       }
 
-      if (!useGcpSst) {
+      if (isDemoMode && !useGcpSst) {
         setProgressMsg('Generando transcripción provisional con Gemini 2.5 Flash...');
         const base64Data = await fileToBase64(audioFile);
         const mainAudioPart = {
