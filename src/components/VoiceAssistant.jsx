@@ -599,6 +599,21 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
           // Get GCP API key specifically for Speech-to-Text, falling back to Firebase API key
           const gcpApiKey = import.meta.env.VITE_GCP_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY || "";
 
+          // Determine min and max speaker counts based on user selection
+          let minSpeakerCount = 2;
+          let maxSpeakerCount = 6;
+          if (expectedSpeakers !== 'auto') {
+            const count = parseInt(expectedSpeakers, 10);
+            if (count === 6) {
+              minSpeakerCount = 6;
+              maxSpeakerCount = 12;
+            } else if (count >= 1 && count <= 5) {
+              minSpeakerCount = count;
+              maxSpeakerCount = count;
+            }
+          }
+          console.log(`Setting diarization config: minSpeakerCount=${minSpeakerCount}, maxSpeakerCount=${maxSpeakerCount}`);
+
           // Call Speech-to-Text API longrunningrecognize
           const sttRes = await fetch(
             `https://speech.googleapis.com/v1/speech:longrunningrecognize?key=${gcpApiKey.trim()}`,
@@ -612,8 +627,8 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
                   languageCode: "es-ES",
                   diarizationConfig: {
                     enableSpeakerDiarization: true,
-                    minSpeakerCount: 2,
-                    maxSpeakerCount: 5
+                    minSpeakerCount: minSpeakerCount,
+                    maxSpeakerCount: maxSpeakerCount
                   }
                 },
                 audio: {
@@ -733,9 +748,15 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
           }
         };
 
+        const expectedSpeakersText = expectedSpeakers === 'auto' 
+          ? 'un número indeterminado de' 
+          : expectedSpeakers === '6' 
+            ? '6 o más' 
+            : expectedSpeakers;
+
         const transcribePrompt = `
 Eres un transcriptor experto. Transcribe el siguiente archivo de audio de una reunión de club de lectura en español.
-Realiza la diarización acústica para separar las intervenciones de los diferentes hablantes.
+Realiza la diarización acústica para separar las intervenciones de los diferentes hablantes. En esta grabación participan exactamente ${expectedSpeakersText} miembros/voces.
 Escribe la transcripción completa de forma cronológica, etiquetando a cada hablante de forma secuencial como "[Speaker 1]", "[Speaker 2]", "[Speaker 3]", etc., según vayan apareciendo en el audio.
 No intentes adivinar sus nombres reales. Limítate a transcribir exactamente lo que dicen y a separarlos por etiquetas de altavoz "[Speaker X]".
 Devuelve únicamente el texto de la transcripción, sin ningún formato adicional.
@@ -1401,7 +1422,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                   {audioFile && (
                     <div style={{ marginTop: '1.25rem', marginBottom: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                       <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
-                        <Volume2 size={14} /> Número de hablantes esperado
+                        <Volume2 size={14} /> Número de miembros esperado
                       </label>
                       <select
                         className="form-select"
@@ -1410,12 +1431,12 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                         style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-primary)', borderColor: 'var(--border)' }}
                       >
                         <option value="auto">Automático (Detectar automáticamente)</option>
-                        <option value="1">1 hablante</option>
-                        <option value="2">2 hablantes</option>
-                        <option value="3">3 hablantes</option>
-                        <option value="4">4 hablantes</option>
-                        <option value="5">5 hablantes</option>
-                        <option value="6">6 o más hablantes</option>
+                        <option value="1">1 miembro</option>
+                        <option value="2">2 miembros</option>
+                        <option value="3">3 miembros</option>
+                        <option value="4">4 miembros</option>
+                        <option value="5">5 miembros</option>
+                        <option value="6">6 o más miembros</option>
                       </select>
                     </div>
                   )}
@@ -1456,7 +1477,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                     gap: '0.5rem'
                   }}>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
-                      🧪 ¿Quieres probar la interfaz con múltiples hablantes y audio inmediatamente?
+                      🧪 ¿Quieres probar la interfaz con múltiples miembros y audio inmediatamente?
                     </p>
                     <button
                       type="button"
@@ -1473,17 +1494,17 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                         cursor: 'pointer'
                       }}
                     >
-                      <Sparkles size={12} /> Simular conversación con 5 Hablantes
+                      <Sparkles size={12} /> Simular conversación con 5 Miembros
                     </button>
                   </div>
                 </div>
               ) : status === 'mapping' ? (
                 <div style={{ marginTop: '1.5rem', textAlign: 'left' }}>
                   <h4 className="serif-title" style={{ fontSize: '1.25rem', marginBottom: '0.5rem', color: 'var(--primary)' }}>
-                    Mapeo de Hablantes Detectados
+                    Mapeo de Miembros Detectados
                   </h4>
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-                    Hemos detectado {detectedSpeakers.length} hablantes en la grabación. Por favor, asigna cada uno a un miembro del club o a un Invitado basándose en la frase de muestra.
+                    Hemos detectado {detectedSpeakers.length} voces/miembros en la grabación. Por favor, asigna cada uno a un miembro del club o a un Invitado basándose en la frase de muestra.
                   </p>
                   
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -1570,7 +1591,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                   </div>
                   {Object.values(speakerMapping).some(val => val === '') && (
                     <p style={{ fontSize: '0.75rem', color: 'var(--clay)', marginTop: '0.5rem', textAlign: 'center' }}>
-                      * Por favor, asigna todos los hablantes antes de continuar.
+                      * Por favor, asigna todas las voces antes de continuar.
                     </p>
                   )}
                 </div>
@@ -1661,7 +1682,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                   </div>
                   
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem', textAlign: 'center' }}>
-                    Selecciona tu perfil de hablante abajo para revisar sus opiniones y ver/copiar sus notas detalladas.
+                    Selecciona tu miembro abajo para revisar tus opiniones y ver/copiar tus notas detalladas.
                   </p>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
