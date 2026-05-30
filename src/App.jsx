@@ -248,7 +248,7 @@ export default function App() {
         <div className="header-content">
           <a href="#" className="logo" style={{ transition: 'opacity 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.opacity = '0.8'} onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}>
             <FlamingoIcon size={28} />
-            <span>Flamingo<span style={{ fontWeight: '300', opacity: 0.8 }}>Reviews</span></span>
+            <span>Reseñas<span style={{ fontWeight: '300', opacity: 0.8 }}> Flamingueras</span></span>
           </a>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -280,32 +280,8 @@ export default function App() {
         </div>
       </header>
 
-      {/* Hero Intro */}
-      <section style={{
-        padding: '6rem 1.5rem 4rem 1.5rem',
-        textAlign: 'center',
-        position: 'relative'
-      }}>
-        <div style={{ maxWidth: '700px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <h1 className="hero-title">
-            Flamingo Library
-          </h1>
-          <p style={{
-            fontFamily: 'var(--font-serif)',
-            fontSize: '1.25rem',
-            fontStyle: 'italic',
-            color: 'var(--text-muted)',
-            maxWidth: '560px',
-            margin: '0 auto',
-            lineHeight: '1.6'
-          }}>
-            Reseñas literarias del club, citas memorables, y transcripciones automatizadas con análisis inteligente de nuestras tertulias.
-          </p>
-        </div>
-      </section>
-
       {/* Main Shelves */}
-      <main className="container" style={{ paddingTop: '0.5rem' }}>
+      <main className="container" style={{ paddingTop: '2.5rem' }}>
         {/* Controls Card */}
         <div className="controls-card">
           <div className="search-wrapper">
