@@ -23,6 +23,7 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
   const [progressMsg, setProgressMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [funnyMsg, setFunnyMsg] = useState('');
+  const [showFullTranscript, setShowFullTranscript] = useState(false);
 
   // Periodically change funny message during loading/processing states
   useEffect(() => {
@@ -1659,8 +1660,85 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                     Mapeo de Miembros Detectados
                   </h4>
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-                    Hemos detectado {detectedSpeakers.length} voces/miembros en la grabación. Por favor, asigna cada uno a un miembro del club o a un Invitado basándose en la frase de muestra.
+                    Hemos detectado {detectedSpeakers.length} voces/miembros en la grabación. Por favor, asigna cada uno a un miembro del club o a un Invitado. Puedes desplegar la transcripción completa para ver el contexto de la charla.
                   </p>
+
+                  {/* Collapsible Full Transcript Viewer */}
+                  <div style={{
+                    marginBottom: '1.5rem',
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    overflow: 'hidden'
+                  }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setShowFullTranscript(!showFullTranscript)}
+                      style={{
+                        width: '100%',
+                        justifyContent: 'space-between',
+                        borderRadius: 0,
+                        border: 'none',
+                        borderBottom: showFullTranscript ? '1px solid var(--border)' : 'none',
+                        background: 'rgba(255, 255, 255, 0.04)',
+                        fontSize: '0.85rem',
+                        padding: '0.75rem 1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '600' }}>
+                        <FileAudio size={16} style={{ color: 'var(--primary)' }} />
+                        {showFullTranscript ? 'Ocultar Transcripción Completa' : 'Ver Transcripción Completa'}
+                      </span>
+                      <span style={{ fontSize: '0.75rem' }}>{showFullTranscript ? '▲' : '▼'}</span>
+                    </button>
+                    
+                    {showFullTranscript && (
+                      <div style={{
+                        maxHeight: '260px',
+                        overflowY: 'auto',
+                        padding: '1rem',
+                        fontSize: '0.85rem',
+                        lineHeight: '1.6',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.75rem',
+                        background: 'var(--bg-card)'
+                      }}>
+                        {diarizedTranscript.split('\n').filter(line => line.trim() !== '').map((line, idx) => {
+                          const match = line.match(/^\[(Speaker\s+\d+)\]:?(.*)$/i);
+                          if (match) {
+                            const spTag = match[1];
+                            const text = match[2];
+                            const mappedName = speakerMapping[spTag];
+                            return (
+                              <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                                <span style={{ 
+                                  fontWeight: 'bold', 
+                                  color: mappedName ? 'var(--sage)' : 'var(--primary)', 
+                                  fontSize: '0.75rem', 
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.05em',
+                                  transition: 'color 0.2s'
+                                }}>
+                                  {spTag} {mappedName ? `→ ${mappedName}` : ''}
+                                </span>
+                                <span style={{ color: 'var(--text-primary)' }}>{text.trim()}</span>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div key={idx} style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                              {line}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                   
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     {detectedSpeakers.map((sp) => {
