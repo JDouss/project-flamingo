@@ -220,6 +220,22 @@ export default function App() {
 
     if (isDemoMode) {
       setBooks((prev) => prev.map((b) => b.id === bookId ? { ...b, ...updateData } : b));
+      
+      // Update local storage for transcription to reference the bookId in demo mode
+      if (transcriptionId) {
+        try {
+          const currentHistory = JSON.parse(localStorage.getItem('flamingo_transcription_history') || '[]');
+          const updatedHistory = currentHistory.map(item => {
+            if (item.id === transcriptionId || item.createdAt === transcriptionId) {
+              return { ...item, bookId };
+            }
+            return item;
+          });
+          localStorage.setItem('flamingo_transcription_history', JSON.stringify(updatedHistory));
+        } catch (e) {
+          console.warn("Failed to update local transcription in demo mode:", e);
+        }
+      }
     } else {
       const bookRef = doc(db, 'books', bookId);
       await updateDoc(bookRef, updateData);
@@ -266,6 +282,22 @@ export default function App() {
       createdId = 'demo_' + Date.now();
       const bookWithId = { ...newBook, id: createdId };
       setBooks(prev => [bookWithId, ...prev]);
+
+      // Update local storage for transcription to reference the new bookId in demo mode
+      if (transcriptionId) {
+        try {
+          const currentHistory = JSON.parse(localStorage.getItem('flamingo_transcription_history') || '[]');
+          const updatedHistory = currentHistory.map(item => {
+            if (item.id === transcriptionId || item.createdAt === transcriptionId) {
+              return { ...item, bookId: createdId };
+            }
+            return item;
+          });
+          localStorage.setItem('flamingo_transcription_history', JSON.stringify(updatedHistory));
+        } catch (e) {
+          console.warn("Failed to update local transcription in demo mode:", e);
+        }
+      }
     } else {
       const docRef = await addDoc(collection(db, 'books'), newBook);
       createdId = docRef.id;

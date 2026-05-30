@@ -18,6 +18,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
   const [summary, setSummary] = useState('');
   const [review, setReview] = useState('');
   const [privateNotes, setPrivateNotes] = useState('');
+  const [transcriptionId, setTranscriptionId] = useState(null);
   
   // Image upload state
   const [imageFile, setImageFile] = useState(null);
@@ -119,13 +120,14 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
     const session = sessionDrafts.find(d => d.id === selectedDraftId || d.createdAt === selectedDraftId);
     if (!session) return;
     
-    const attendees = session.speakers || session.attendees || [];
-    const attendee = attendees.find(a => a.name === selectedAttendeeName || a.id === selectedAttendeeName);
-    
-    if (attendee) {
-      setPrivateNotes(attendee.notesMarkdown || '');
-      setSummary(attendee.summary || session.generalSummary || '');
-      
+    const isNewFormat = !!(session.sessionSummaryMarkdown || session.result?.sessionSummaryMarkdown);
+
+    if (isNewFormat) {
+      const summaryMarkdown = session.sessionSummaryMarkdown || session.result?.sessionSummaryMarkdown || '';
+      setPrivateNotes(summaryMarkdown);
+      setSummary(session.generalSummary || session.result?.generalSummary || '');
+      setTranscriptionId(session.id || null);
+
       if (session.bookId && session.bookId !== 'new_book') {
         const matchingBook = books.find(b => b.id === session.bookId);
         if (matchingBook) {
@@ -133,18 +135,53 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
           setAuthor(matchingBook.author || '');
           setGenre(matchingBook.genre || '');
         }
+      } else {
+        const deducedTitle = session.bookTitle || session.result?.bookTitle || '';
+        const deducedAuthor = session.bookAuthor || session.result?.bookAuthor || '';
+        const deducedGenre = session.bookGenre || session.result?.bookGenre || '';
+        if (deducedTitle) setTitle(deducedTitle);
+        if (deducedAuthor) setAuthor(deducedAuthor);
+        if (deducedGenre) setGenre(deducedGenre);
       }
 
       if (session.grades) {
         setGrades(session.grades);
       }
-      
-      alert(`Borrador de sesión cargado con éxito para ${selectedAttendeeName}. Las notas privadas, resumen y calificaciones han sido actualizados.`);
+
+      alert("Borrador de sesión cargado con éxito. Se ha importado el resumen de la sesión y las calificaciones.");
       setShowDraftSelector(false);
       setSelectedDraftId('');
       setSelectedAttendeeName('');
     } else {
-      alert("No se pudo encontrar las notas para el miembro seleccionado en esta sesión.");
+      // Old format fallback
+      const attendees = session.speakers || session.attendees || [];
+      const attendee = attendees.find(a => a.name === selectedAttendeeName || a.id === selectedAttendeeName);
+      
+      if (attendee) {
+        setPrivateNotes(attendee.notesMarkdown || '');
+        setSummary(attendee.summary || session.generalSummary || '');
+        setTranscriptionId(session.id || null);
+        
+        if (session.bookId && session.bookId !== 'new_book') {
+          const matchingBook = books.find(b => b.id === session.bookId);
+          if (matchingBook) {
+            setTitle(matchingBook.title || '');
+            setAuthor(matchingBook.author || '');
+            setGenre(matchingBook.genre || '');
+          }
+        }
+
+        if (session.grades) {
+          setGrades(session.grades);
+        }
+        
+        alert(`Borrador de sesión cargado con éxito para ${selectedAttendeeName}. Las notas, resumen y calificaciones han sido actualizados.`);
+        setShowDraftSelector(false);
+        setSelectedDraftId('');
+        setSelectedAttendeeName('');
+      } else {
+        alert("No se pudo encontrar las notas para el miembro seleccionado en esta sesión.");
+      }
     }
   };
 
@@ -161,6 +198,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
       setSummary(editBook.summary || '');
       setReview(editBook.review || '');
       setPrivateNotes(editBook.privateNotes || '');
+      setTranscriptionId(editBook.transcriptionId || null);
       setImageUrl(editBook.imageUrl || '');
       setImagePreview(editBook.imageUrl || '');
       setQuotes(editBook.quotes && editBook.quotes.length > 0 ? editBook.quotes : [{ text: '', page: '', context: '' }]);
@@ -178,6 +216,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
       setSummary('');
       setReview('');
       setPrivateNotes('');
+      setTranscriptionId(null);
       setImageFile(null);
       setImagePreview('');
       setImageUrl('');
@@ -340,6 +379,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
         summary: summary.trim(),
         review: review.trim(),
         privateNotes: privateNotes.trim(),
+        transcriptionId: transcriptionId || null,
         imageUrl: finalImageUrl,
         quotes: cleanedQuotes,
         references: cleanedReferences,
@@ -347,8 +387,10 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
         updatedAt: new Date().toISOString()
       };
 
+      let savedBookId = '';
       if (editBook) {
         // Edit Mode
+        savedBookId = editBook.id;
         if (isDemoMode) {
           const updatedBooks = books.map(b => b.id === editBook.id ? { ...b, ...bookData, id: editBook.id } : b);
           setBooks(updatedBooks);
@@ -359,15 +401,42 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
       } else {
         // Add Mode
         if (isDemoMode) {
+          savedBookId = 'mock-' + Date.now();
           const newBook = {
             ...bookData,
-            id: 'mock-' + Date.now(),
+            id: savedBookId,
             createdAt: new Date().toISOString()
           };
           setBooks([newBook, ...books]);
         } else {
           bookData.createdAt = new Date().toISOString();
-          await addDoc(collection(db, 'books'), bookData);
+          const docRef = await addDoc(collection(db, 'books'), bookData);
+          savedBookId = docRef.id;
+        }
+      }
+
+      // Bidirectional reference update
+      if (transcriptionId && savedBookId) {
+        if (!isDemoMode) {
+          try {
+            const transRef = doc(db, 'transcriptions', transcriptionId);
+            await updateDoc(transRef, { bookId: savedBookId });
+          } catch (e) {
+            console.warn("Failed to link transcription to book:", e);
+          }
+        } else {
+          try {
+            const currentHistory = JSON.parse(localStorage.getItem('flamingo_transcription_history') || '[]');
+            const updatedHistory = currentHistory.map(item => {
+              if (item.id === transcriptionId || item.createdAt === transcriptionId) {
+                return { ...item, bookId: savedBookId };
+              }
+              return item;
+            });
+            localStorage.setItem('flamingo_transcription_history', JSON.stringify(updatedHistory));
+          } catch (e) {
+            console.warn("Failed to link transcription to book in local storage:", e);
+          }
         }
       }
 
@@ -497,39 +566,59 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
                         </select>
                       </div>
 
-                      {selectedDraftId && (
-                        <div className="form-group">
-                          <label className="form-label" style={{ fontSize: '0.8rem' }}>¿Quién eres tú en esta sesión?</label>
-                          <select
-                            className="form-select"
-                            value={selectedAttendeeName}
-                            onChange={(e) => setSelectedAttendeeName(e.target.value)}
-                            style={{ width: '100%', fontSize: '0.85rem', background: 'var(--bg-card)', color: 'var(--text-primary)', borderColor: 'var(--border)' }}
-                          >
-                            <option value="">-- Seleccionar participante --</option>
-                            {(() => {
-                              const session = sessionDrafts.find(d => d.id === selectedDraftId || d.createdAt === selectedDraftId);
-                              const attendees = session ? (session.speakers || session.attendees || []) : [];
-                              return attendees.map((a) => (
-                                <option key={a.name || a.id} value={a.name || a.id}>
-                                  {a.name || a.id}
-                                </option>
-                              ));
-                            })()}
-                          </select>
-                        </div>
-                      )}
-
-                      {selectedDraftId && selectedAttendeeName && (
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          onClick={handleImportSessionDraft}
-                          style={{ width: '100%', fontSize: '0.85rem', display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
-                        >
-                          <Sparkles size={14} /> Cargar Datos en Formulario
-                        </button>
-                      )}
+                      {selectedDraftId && (() => {
+                        const session = sessionDrafts.find(d => d.id === selectedDraftId || d.createdAt === selectedDraftId);
+                        const isNewFormat = session ? !!(session.sessionSummaryMarkdown || session.result?.sessionSummaryMarkdown) : false;
+                        
+                        if (isNewFormat) {
+                          return (
+                            <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(255, 42, 122, 0.05)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255, 42, 122, 0.15)' }}>
+                              <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-primary)', lineHeight: '1.4' }}>
+                                ✨ <strong>Sesión con resumen compartido detectada.</strong> Se importará la memoria completa del debate, calificaciones y metadatos deducidos del libro.
+                              </p>
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={handleImportSessionDraft}
+                                style={{ width: '100%', fontSize: '0.85rem', marginTop: '0.75rem', display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
+                              >
+                                <Sparkles size={14} /> Cargar Datos en Formulario
+                              </button>
+                            </div>
+                          );
+                        } else {
+                          return (
+                            <>
+                              <div className="form-group">
+                                <label className="form-label" style={{ fontSize: '0.8rem' }}>¿Quién eres tú en esta sesión? (Formato antiguo)</label>
+                                <select
+                                  className="form-select"
+                                  value={selectedAttendeeName}
+                                  onChange={(e) => setSelectedAttendeeName(e.target.value)}
+                                  style={{ width: '100%', fontSize: '0.85rem', background: 'var(--bg-card)', color: 'var(--text-primary)', borderColor: 'var(--border)' }}
+                                >
+                                  <option value="">-- Seleccionar participante --</option>
+                                  {session && (session.speakers || session.attendees || []).map((a) => (
+                                    <option key={a.name || a.id} value={a.name || a.id}>
+                                      {a.name || a.id}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              {selectedAttendeeName && (
+                                <button
+                                  type="button"
+                                  className="btn btn-primary"
+                                  onClick={handleImportSessionDraft}
+                                  style={{ width: '100%', fontSize: '0.85rem', display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
+                                >
+                                  <Sparkles size={14} /> Cargar Datos en Formulario
+                                </button>
+                              )}
+                            </>
+                          );
+                        }
+                      })()}
                     </>
                   )}
                 </div>
@@ -755,7 +844,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                 <label className="form-label" style={{ color: 'var(--primary)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: 0 }}>
-                  Notas preliminares privadas <span style={{ fontSize: '0.75rem', fontWeight: 'normal', color: 'var(--text-muted)' }}>(Solo para administrador — no público)</span>
+                  Resumen y Memoria de la Sesión <span style={{ fontSize: '0.75rem', fontWeight: 'normal', color: 'var(--text-muted)' }}>(Público para todos los miembros)</span>
                 </label>
                 <button
                   type="button"
@@ -771,7 +860,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
                 style={{ minHeight: '100px', borderColor: 'var(--border)' }}
                 value={privateNotes}
                 onChange={(e) => setPrivateNotes(e.target.value)}
-                placeholder="Añade notas preliminares privadas, ideas para desarrollar más tarde o recordatorios personales sobre este libro..."
+                placeholder="Añade el resumen detallado de la sesión, acuerdos principales, opiniones individuales y consensos grupales de los miembros..."
               />
             </div>
 

@@ -8,7 +8,12 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
   // Filter completed books with grades
   const gradedBooks = useMemo(() => {
     return books
-      .filter(b => b.status === 'completed' && b.grades && Object.keys({ ...b.grades.start, ...b.grades.end }).length > 0)
+      .filter(b => {
+        if (b.status !== 'completed' || !b.grades) return false;
+        const startVals = Object.values(b.grades.start || {}).filter(v => typeof v === 'number' && !isNaN(v));
+        const endVals = Object.values(b.grades.end || {}).filter(v => typeof v === 'number' && !isNaN(v));
+        return startVals.length > 0 || endVals.length > 0;
+      })
       .sort((a, b) => new Date(a.endDate || a.createdAt) - new Date(b.endDate || b.createdAt));
   }, [books]);
 

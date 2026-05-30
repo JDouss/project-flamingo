@@ -1,9 +1,43 @@
-import React, { useState } from 'react';
-import { X, Star, Calendar, ChevronLeft, ChevronRight, Quote, Link, Edit2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Star, Calendar, ChevronLeft, ChevronRight, Quote, Link, Edit2, Volume2, FileText } from 'lucide-react';
 import { renderMarkdown } from '../utils/markdown';
+import { db } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
-export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
+export default function BookDetails({ book, onClose, onEdit, isAdmin, isDemoMode }) {
   const [activeQuoteIdx, setActiveQuoteIdx] = useState(0);
+  const [sessionData, setSessionData] = useState(null);
+  const [loadingSession, setLoadingSession] = useState(false);
+
+  useEffect(() => {
+    if (book && book.transcriptionId) {
+      const fetchSession = async () => {
+        setLoadingSession(true);
+        try {
+          if (!isDemoMode && db) {
+            const docRef = doc(db, 'transcriptions', book.transcriptionId);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+              setSessionData(docSnap.data());
+            }
+          } else {
+            const currentHistory = JSON.parse(localStorage.getItem('flamingo_transcription_history') || '[]');
+            const session = currentHistory.find(item => item.id === book.transcriptionId || item.createdAt === book.transcriptionId);
+            if (session) {
+              setSessionData(session);
+            }
+          }
+        } catch (err) {
+          console.error("Error fetching session details in BookDetails:", err);
+        } finally {
+          setLoadingSession(false);
+        }
+      };
+      fetchSession();
+    } else {
+      setSessionData(null);
+    }
+  }, [book, isDemoMode]);
 
   if (!book) return null;
 
@@ -118,7 +152,10 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
             const membersList = Object.keys({ ...startGrades, ...endGrades });
             
             // Filter out empty grades
-            const validMembers = membersList.filter(m => startGrades[m] !== undefined || endGrades[m] !== undefined);
+            const validMembers = membersList.filter(m => 
+              (startGrades[m] !== undefined && startGrades[m] !== null && startGrades[m] !== '') || 
+              (endGrades[m] !== undefined && endGrades[m] !== null && endGrades[m] !== '')
+            );
             if (validMembers.length === 0) return null;
 
             // Calculate averages
@@ -349,8 +386,8 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
             </div>
           )}
 
-          {/* Private Notes (Admin Only) */}
-          {isAdmin && (
+          {/* Resumen y Memoria de la Sesión (Público) */}
+          {privateNotes ? (
             <div style={{
               marginTop: '2.5rem',
               background: 'rgba(214, 130, 134, 0.02)',
@@ -367,27 +404,115 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
                 alignItems: 'center',
                 gap: '0.5rem'
               }}>
-                🔒 Notas preliminares privadas
+                📝 Resumen y Memoria del Debate
               </h3>
-              {privateNotes ? (
-                <div style={{ 
-                  color: 'var(--text-primary)', 
-                  fontSize: '0.95rem',
-                  lineHeight: '1.6' 
+              <div style={{ 
+                color: 'var(--text-primary)', 
+                fontSize: '0.95rem',
+                lineHeight: '1.6' 
+              }}>
+                {renderMarkdown(privateNotes)}
+              </div>
+            </div>
+          ) : (
+            isAdmin && (
+              <div style={{
+                marginTop: '2.5rem',
+                background: 'rgba(214, 130, 134, 0.02)',
+                padding: '1.25rem',
+                borderRadius: 'var(--radius-md)',
+                border: '1px dashed var(--primary)'
+              }}>
+                <h3 className="section-title" style={{ 
+                  color: 'var(--primary)', 
+                  marginTop: 0, 
+                  marginBottom: '0.75rem',
+                  fontSize: '1.1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
                 }}>
-                  {renderMarkdown(privateNotes)}
-                </div>
-              ) : (
+                  📝 Resumen y Memoria del Debate
+                </h3>
                 <p style={{ 
                   color: 'var(--text-muted)', 
                   fontStyle: 'italic', 
                   fontSize: '0.9rem' 
                 }}>
-                  Aún no se han añadido notas preliminares privadas para este libro. Haz clic en 'Editar reseña' para añadirlas.
+                  Aún no se ha añadido la memoria del debate para este libro. Haz clic en 'Editar reseña' para añadirla.
+                </p>
+              </div>
+            )
+          )}
+
+          {/* Grabación de Audio y Transcripción de la Sesión Asociada */}
+          {loadingSession ? (
+            <div style={{ marginTop: '2rem', textAlign: 'center', padding: '1rem' }}>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Cargando audio de la sesión asociada...</p>
+            </div>
+          ) : sessionData ? (
+            <div style={{
+              marginTop: '2.5rem',
+              paddingTop: '1.5rem',
+              borderTop: '1px solid var(--border)'
+            }}>
+              <h3 className="section-title" style={{ 
+                color: 'var(--primary)', 
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                fontSize: '1.1rem',
+                marginTop: 0
+              }}>
+                <Volume2 size={20} /> Grabación de la Sesión
+              </h3>
+              
+              {sessionData.audioUrl ? (
+                <div style={{
+                  background: 'var(--bg-secondary)',
+                  padding: '0.75rem 1rem',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border)',
+                  marginBottom: '1rem'
+                }}>
+                  <audio src={sessionData.audioUrl} controls style={{ width: '100%' }} />
+                </div>
+              ) : (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontStyle: 'italic', marginBottom: '1rem' }}>
+                  * Grabación de audio no disponible para esta sesión.
                 </p>
               )}
+
+              {sessionData.transcript && (
+                <details style={{
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.75rem 1rem'
+                }}>
+                  <summary style={{ fontWeight: '600', fontSize: '0.85rem', color: 'var(--text-primary)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>Ver transcripción completa de diálogos</span>
+                  </summary>
+                  <div style={{
+                    marginTop: '0.75rem',
+                    maxHeight: '200px',
+                    overflowY: 'auto',
+                    padding: '0.75rem',
+                    background: 'var(--bg-card)',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border)',
+                    fontSize: '0.8rem',
+                    lineHeight: '1.6',
+                    whiteSpace: 'pre-wrap',
+                    color: 'var(--text-muted)',
+                    textAlign: 'left'
+                  }}>
+                    {sessionData.transcript}
+                  </div>
+                </details>
+              )}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
