@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, adminEmail, authorizedEmails } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc, addDoc } from 'firebase/firestore';
 import { 
   LogIn, 
   LogOut, 
@@ -202,20 +202,86 @@ export default function App() {
     }
   };
 
-  const handleApplyNotesToBook = async (bookId, notesMarkdown, grades = null, generalSummary = null) => {
+  const handleApplyNotesToBook = async (bookId, notesMarkdown, grades = null, generalSummary = null, transcriptionId = null) => {
     const updateData = { privateNotes: notesMarkdown };
     if (grades) updateData.grades = grades;
-    if (generalSummary) updateData.summary = generalSummary;
+    
+    // Only update summary (synopsis) if current is empty to prevent overwriting
+    if (generalSummary) {
+      const currentBook = books.find(b => b.id === bookId);
+      if (!currentBook || !currentBook.summary) {
+        updateData.summary = generalSummary;
+      }
+    }
+
+    if (transcriptionId) {
+      updateData.transcriptionId = transcriptionId;
+    }
 
     if (isDemoMode) {
       setBooks((prev) => prev.map((b) => b.id === bookId ? { ...b, ...updateData } : b));
     } else {
       const bookRef = doc(db, 'books', bookId);
       await updateDoc(bookRef, updateData);
+
+      // Bidirectional reference update
+      if (transcriptionId) {
+        try {
+          const transRef = doc(db, 'transcriptions', transcriptionId);
+          await updateDoc(transRef, { bookId });
+        } catch (e) {
+          console.warn("Failed to update bookId on transcription:", e);
+        }
+      }
     }
+
     if (selectedBook && selectedBook.id === bookId) {
       setSelectedBook(prev => ({ ...prev, ...updateData }));
     }
+  };
+
+  const handleCreateBookFromSession = async (title, author, genre, notesMarkdown, grades = null, generalSummary = null, transcriptionId = null) => {
+    const newBook = {
+      title: title.trim(),
+      author: author.trim(),
+      genre: (genre || 'Debate').trim(),
+      rating: 5,
+      status: 'completed',
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: new Date().toISOString().split('T')[0],
+      summary: generalSummary || '',
+      review: '',
+      privateNotes: notesMarkdown,
+      grades: grades || { start: {}, end: {} },
+      imageUrl: 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?auto=format&fit=crop&q=80&w=300',
+      quotes: [],
+      references: [],
+      transcriptionId: transcriptionId || null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    let createdId = '';
+    if (isDemoMode) {
+      createdId = 'demo_' + Date.now();
+      const bookWithId = { ...newBook, id: createdId };
+      setBooks(prev => [bookWithId, ...prev]);
+    } else {
+      const docRef = await addDoc(collection(db, 'books'), newBook);
+      createdId = docRef.id;
+
+      // Bidirectional reference update
+      if (transcriptionId) {
+        try {
+          const transRef = doc(db, 'transcriptions', transcriptionId);
+          await updateDoc(transRef, { bookId: createdId });
+        } catch (e) {
+          console.warn("Failed to update bookId on transcription:", e);
+        }
+      }
+    }
+
+    return createdId;
   };
 
   return (
@@ -223,8 +289,8 @@ export default function App() {
       {/* Demo Mode Notice */}
       {isDemoMode && (
         <div style={{
-          background: 'linear-gradient(135deg, rgba(255, 42, 122, 0.1) 0%, rgba(255, 190, 59, 0.1) 100%)',
-          borderBottom: '1px solid rgba(255, 42, 122, 0.18)',
+          background: 'linear-gradient(135deg, rgba(255, 26, 117, 0.12) 0%, rgba(255, 107, 53, 0.12) 100%)',
+          borderBottom: '1px solid rgba(255, 26, 117, 0.22)',
           padding: '0.75rem 1rem',
           textAlign: 'center',
           fontSize: '0.85rem',
@@ -422,6 +488,7 @@ export default function App() {
             startEdit(book); // open edit panel
           }}
           isAdmin={!!user}
+          isDemoMode={isDemoMode}
         />
       )}
 
@@ -432,6 +499,7 @@ export default function App() {
           isDemoMode={isDemoMode}
           books={books}
           onApplyNotesToBook={handleApplyNotesToBook}
+          onCreateBookFromSession={handleCreateBookFromSession}
         />
       )}
       {isStatsOpen && (

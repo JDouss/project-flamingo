@@ -5,39 +5,41 @@
   --font-serif: 'Newsreader', Georgia, Cambria, serif;
   --font-display: 'Outfit', 'Plus Jakarta Sans', sans-serif;
 
-  /* Color Palette - Ultra-Premium Sleek Dark Mode */
-  --bg-primary: #070709;      /* Void Black */
-  --bg-secondary: #0f1015;    /* Deep Charcoal Slate */
-  --bg-card: rgba(18, 19, 26, 0.65); /* Translucent Card Glass */
-  --bg-dark: #030304;         /* pure void */
+  /* Color Palette - Club de lectura Flamingo Rock */
+  --bg-primary: #120914;      /* Deep Plum Violet base */
+  --bg-secondary: #1a0e1c;    /* Warm Orchid Grape */
+  --bg-card: rgba(26, 14, 28, 0.72); /* Translucent Berry Glass */
+  --bg-dark: #0a040b;         /* pure midnight violet */
   
-  --primary: #ff2a7a;         /* Glowing Neon Flamingo Pink */
-  --primary-hover: #e21c66;
-  --primary-light: rgba(255, 42, 122, 0.1);
-  --primary-glow: rgba(255, 42, 122, 0.15);
+  --primary: #ff1a75;         /* Vibrant Neon Flamingo Pink */
+  --primary-hover: #ff4d94;
+  --primary-light: rgba(255, 26, 117, 0.12);
+  --primary-glow: rgba(255, 26, 117, 0.22);
   
-  --secondary: #1d1e24;       /* Slate border */
-  --secondary-hover: #292a34;
+  --secondary: #2c1630;       /* Deep Wine Border */
+  --secondary-hover: #3d1f43;
   
   /* Status indications and accents */
-  --accent-gold: #ffbe3b;     /* Warm Amber Accent */
-  --accent-coral: #ff4a6b;    /* Bright Coral */
+  --accent-rock: #00f0ff;     /* Electric Cyan */
+  --accent-sunset: #ff6b35;   /* Sunset Orange */
+  --accent-gold: #fec313;     /* Warm Rock Gold Accent */
+  --accent-coral: #ff527b;    /* Bright Coral */
   --sage: #00f5a0;            /* Electric Mint Green */
-  --sage-light: rgba(0, 245, 160, 0.1);
-  --clay: #ff4a6b;            
-  --clay-light: rgba(255, 74, 107, 0.1);
+  --sage-light: rgba(0, 245, 160, 0.12);
+  --clay: #ff527b;            
+  --clay-light: rgba(255, 82, 123, 0.12);
 
-  --text-primary: #f4f4f7;    /* Crisp White/Gray for Reading */
-  --text-muted: #8e909e;      /* Muted Slate Gray for Captions */
+  --text-primary: #fff2f5;    /* Warm Creamy White with Rose Hint */
+  --text-muted: #a695a9;      /* Lavender Gray for secondary text */
   --text-light: #ffffff;      
   
-  --border: rgba(255, 255, 255, 0.08); /* fine hairline borders */
-  --border-focus: #ff2a7a;
+  --border: rgba(255, 26, 117, 0.12); /* pink-tinted hairline borders */
+  --border-focus: #00f0ff;    /* Cyan focused border */
   
-  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.55);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.7);
-  --shadow-glow: 0 0 25px rgba(255, 42, 122, 0.18);
+  --shadow-sm: 0 2px 10px rgba(10, 4, 11, 0.5);
+  --shadow-md: 0 8px 30px rgba(10, 4, 11, 0.7);
+  --shadow-lg: 0 16px 40px rgba(10, 4, 11, 0.85);
+  --shadow-glow: 0 0 25px rgba(255, 26, 117, 0.2), 0 0 45px rgba(0, 240, 255, 0.1);
 
   --radius-sm: 8px;
   --radius-md: 14px;
@@ -58,8 +60,9 @@ body {
   font-family: var(--font-sans);
   background-color: var(--bg-primary);
   background-image: 
-    radial-gradient(circle at 15% 15%, rgba(255, 42, 122, 0.07) 0%, transparent 45%),
-    radial-gradient(circle at 85% 85%, rgba(0, 245, 160, 0.05) 0%, transparent 50%);
+    radial-gradient(circle at 10% 15%, rgba(255, 26, 117, 0.13) 0%, transparent 50%),
+    radial-gradient(circle at 85% 85%, rgba(0, 240, 255, 0.09) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(255, 107, 53, 0.05) 0%, transparent 60%);
   background-attachment: fixed;
   color: var(--text-primary);
   min-height: 100vh;
@@ -111,7 +114,7 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--text-primary);
   line-height: 1.05;
   margin: 0;
-  background: linear-gradient(135deg, #ffffff 30%, #a1a1aa 100%);
+  background: linear-gradient(135deg, #ffffff 15%, #ff1a75 60%, #ff6b35 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -173,7 +176,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .glass-card:hover {
-  border-color: rgba(255, 42, 122, 0.35);
+  border-color: rgba(255, 26, 117, 0.45);
   box-shadow: var(--shadow-md), var(--shadow-glow);
   transform: translateY(-4px);
 }
@@ -269,7 +272,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .rating-stars .star-filled {
   color: var(--primary);
-  filter: drop-shadow(0 0 4px rgba(255, 42, 122, 0.3));
+  filter: drop-shadow(0 0 4px rgba(255, 26, 117, 0.45));
 }
 
 .book-card-summary {
@@ -316,12 +319,12 @@ h1, h2, h3, h4, h5, h6 {
   background: var(--primary);
   color: var(--text-light);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 12px rgba(255, 42, 122, 0.2);
+  box-shadow: 0 4px 12px rgba(255, 26, 117, 0.3);
 }
 
 .btn-primary:hover {
   background: var(--primary-hover);
-  box-shadow: 0 4px 20px rgba(255, 42, 122, 0.35);
+  box-shadow: 0 4px 20px rgba(255, 26, 117, 0.5);
   transform: translateY(-1px);
 }
 
@@ -415,7 +418,7 @@ h1, h2, h3, h4, h5, h6 {
   gap: 2.5rem;
   padding: 3.5rem 3rem 2.5rem;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(255, 42, 122, 0.04) 0%, rgba(255, 42, 122, 0) 100%);
+  background: linear-gradient(180deg, rgba(255, 26, 117, 0.08) 0%, rgba(255, 26, 117, 0) 100%);
 }
 
 @media (min-width: 768px) {
@@ -704,7 +707,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .upload-zone:hover, .upload-zone.dragging {
   border-color: var(--primary);
-  background: rgba(255, 42, 122, 0.03);
+  background: rgba(255, 26, 117, 0.05);
 }
 
 .upload-icon {
@@ -931,7 +934,7 @@ h1, h2, h3, h4, h5, h6 {
 .status-reading {
   background: var(--primary-light);
   color: var(--primary);
-  border: 1px solid rgba(255, 42, 122, 0.2);
+  border: 1px solid rgba(255, 26, 117, 0.3);
 }
 
 .status-to-read {
@@ -947,9 +950,9 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .book-badge.status-reading {
-  background: rgba(255, 42, 122, 0.12);
+  background: rgba(255, 26, 117, 0.15);
   color: var(--primary);
-  border: 1px solid rgba(255, 42, 122, 0.2);
+  border: 1px solid rgba(255, 26, 117, 0.3);
 }
 
 .book-badge.status-to-read {
@@ -1131,7 +1134,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .voice-upload-zone:hover, .voice-upload-zone.dragging {
   border-color: var(--primary);
-  background: rgba(255, 42, 122, 0.03);
+  background: rgba(255, 26, 117, 0.05);
 }
 
 .voice-upload-icon {
@@ -1149,8 +1152,8 @@ h1, h2, h3, h4, h5, h6 {
 .voice-notice-box {
   display: flex;
   gap: 0.75rem;
-  background: rgba(255, 74, 107, 0.08);
-  border: 1px solid rgba(255, 74, 107, 0.15);
+  background: rgba(255, 107, 53, 0.08);
+  border: 1px solid rgba(255, 107, 53, 0.2);
   border-radius: var(--radius-sm);
   padding: 0.85rem 1rem;
   margin-top: 1rem;
