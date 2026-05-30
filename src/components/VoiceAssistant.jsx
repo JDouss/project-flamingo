@@ -490,7 +490,7 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
     }
   };
 
-  // Run the analysis using Gemini 2.5 Flash
+  // Run the analysis using Gemini 3.5 Flash
   const handleAnalyzeAudio = async () => {
     if (!apiKey.trim()) {
       setErrorMsg('Por favor, ingresa una clave API de Gemini válida para continuar.');
@@ -797,7 +797,7 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
       }
 
       if (isDemoMode && !useGcpSst) {
-        setProgressMsg('Generando transcripción provisional con Gemini 2.5 Flash...');
+        setProgressMsg('Generando transcripción provisional con Gemini 3.5 Flash...');
         const base64Data = await fileToBase64(audioFile);
         const mainAudioPart = {
           inlineData: {
@@ -821,7 +821,7 @@ Devuelve únicamente el texto de la transcripción, sin ningún formato adiciona
 `;
 
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey.trim()}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey.trim()}`,
           {
             method: 'POST',
             headers: {
@@ -950,15 +950,29 @@ Devuelve únicamente el texto de la transcripción, sin ningún formato adiciona
             id: mappedName,
             voiceSnippet: snippet,
             summary: `Yo opiné que la discusión fue muy fructífera. Considero que el libro aporta una perspectiva fundamental sobre los temas tratados y que cada miembro pudo dar su punto de vista libremente.`,
-            notesMarkdown: `# Notas preliminares de ${mappedName}
-## Mis Impresiones y Pensamientos Clave (en primera persona)
-- Considero que este libro es excelente. Me gustó especialmente el desarrollo de los personajes principales y la atmósfera creada.
-- Desde mi perspectiva, la narrativa fluye muy bien y engancha al lector desde las primeras páginas.
-## Debates y Puntos de Vista con otros miembros
-- Hablamos con los demás sobre la relevancia histórica y el estilo literario. Hubo opiniones diversas, pero coincidimos en que la obra no deja indiferente a nadie.
-## Ideas y Estructura para mi Reseña Final
-- Pienso enfocar mi reseña en la evolución del protagonista y el simbolismo de los escenarios.
-- Organizaré el texto en tres secciones principales: Introducción a la temática, Análisis estilístico y Conclusiones personales.`
+            notesMarkdown: `# Notas de la Sesión - ${mappedName}
+
+## Temas Debatidos
+- **Relevancia Histórica**: Analizamos cómo el contexto de la posguerra influye en el comportamiento de los personajes. Este tema fue introducido por Alejandro, quien destacó el peso de la censura.
+- **La Estructura Narrativa**: Se debatió el ritmo de la segunda mitad del libro. Joaquín apuntó que hay ciertos giros forzados, mientras que Jaime defendió el suspense creado.
+
+## Análisis de Personajes
+- **El Protagonista**: Hubo interpretaciones encontradas. Mientras Almu defendió su evolución emocional y su lucha interna, Joaquín criticó su aparente pasividad frente a las dificultades.
+- **Fermín**: Consenso absoluto del grupo sobre su papel crucial. Almu introdujo el tema elogiando su lealtad inquebrantable y cómo sus aportaciones humorísticas dan luz al relato.
+
+## Desglose de Posturas
+- **Relevancia Histórica**:
+  - **Mi opinión**: Yo estuve de acuerdo en que el contexto de 1945 define la atmósfera del libro, aunque preferí centrarme en los aspectos literarios.
+  - **Ideas generales**: Alejandro y Almu profundizaron en la influencia del miedo y la censura de la posguerra española en los diálogos.
+- **La Estructura Narrativa**:
+  - **Mi opinión**: Sin opinión directa de ${mappedName}.
+  - **Ideas generales**: El grupo debatió si el ritmo decae o si los giros son justificados, concluyendo en su mayoría que la lectura es sumamente adictiva.
+- **El Protagonista**:
+  - **Mi opinión**: Expresé mis dudas sobre si sus acciones son realistas, sintiendo que en ocasiones se deja llevar demasiado por los acontecimientos sin actuar de forma decisiva.
+  - **Ideas generales**: Se contrastó mi postura con las defensas de Almu y Jaime sobre la psicología profunda y la timidez del personaje.
+- **Fermín**:
+  - **Mi opinión**: Coincidí con Almu en que Fermín es de lejos el personaje más carismático y redondo de la novela.
+  - **Ideas generales**: El grupo coincidió unánimemente en que su lealtad e ingenio añaden un contrapeso perfecto al tono sombrío de la trama.`
           };
         });
 
@@ -987,7 +1001,7 @@ Devuelve únicamente el texto de la transcripción, sin ningún formato adiciona
         return;
       }
 
-      // 2. Request analysis from Gemini 2.5 Flash using text transcript
+      // 2. Request analysis from Gemini 3.5 Flash using text transcript
       const finalPrompt = `
 Eres un secretario experto y analista de clubes de lectura.
 A continuación se presenta la transcripción completa de la discusión de un club de lectura, donde los diálogos ya están atribuidos a los miembros del club por sus nombres reales.
@@ -1002,14 +1016,25 @@ Instrucciones de análisis:
 2. Identifica y extrae las calificaciones individuales (de 1 a 10) que cada miembro dio al inicio de la sesión (expectativas o valoración inicial) y al final de la sesión (valoración tras debatir). Busca frases como "Le doy un 7 al empezar", "Le pongo un 8 al final", "Mi nota inicial es 6", "Termino poniéndole un 8", etc. Si un miembro no da explícitamente una nota, intenta deducirla a partir de su nivel de entusiasmo en la transcripción, o devuélvela como null si no hay información alguna.
 3. Para cada miembro del club de lectura que participó en la sesión (los nombres indicados en la transcripción, tales como Jaime, Almu, Alejandro, Joaquin, Zepe):
    - Genera un resumen de 2 o 3 frases de sus opiniones y contribuciones principales, redactado estrictamente en primera persona singular (ej. "Yo opiné que...", "Pienso que...").
-   - Genera un documento en Markdown detallado y extenso (mínimo 250-400 palabras) que sirva como sus Notas Preliminares Privadas personales. Debe capturar toda su perspectiva como hablante, pensamientos íntimos, aportaciones clave de debate y argumentos. Organizado estrictamente con el siguiente esquema:
-     # Notas preliminares de [Nombre]
-     ## Mis Impresiones y Pensamientos Clave (en primera persona)
-     - Detallar lo que yo pensé o sentí durante la lectura y qué partes me impactaron más.
-     ## Debates y Puntos de Vista con otros miembros
-     - Registrar qué puntos de vista defendieron otros hablantes y en qué estuve de acuerdo o en desacuerdo, detallando la discusión.
-     ## Ideas y Estructura para mi Reseña Final
-     - Mis conclusiones principales y cómo planeo estructurar mis argumentos para la reseña final.
+   - Genera un documento en Markdown estructurado que sirva como sus Notas de la Sesión. El foco debe estar en dicho miembro (es decir, la primera persona "Yo" y "Mi opinión" se refieren a ese miembro en particular; por ejemplo, para Jaime, "Yo" y "Mi opinión" se refieren a Jaime). Organiza el documento estrictamente bajo el siguiente esquema:
+     # Notas de la Sesión - [Nombre del Miembro]
+     
+     ## Temas Debatidos
+     - Extrae los temas principales y subtemas que se han debatido durante la reunión. Resume brevemente qué ángulos se tocaron sobre cada uno y quién los introdujo. Asegúrate de atribuir correctamente cada idea a su speaker en el texto.
+     
+     ## Análisis de Personajes
+     - Lista los personajes de la obra que se han discutido. Resume las diferentes interpretaciones, críticas o defensas que surgieron sobre sus acciones y psicología.
+     
+     ## Desglose de Posturas
+     - Para cada tema y personaje mencionado en las secciones anteriores, haz un contraste explícito bajo el siguiente formato:
+       * **[Nombre del Tema o Personaje]**:
+         - **Mi opinión**: Extrae la postura específica de este miembro en primera persona (ej. "Yo opiné que...", "Mi postura fue..."), detallando sus argumentos e ideas aportadas.
+         - **Ideas generales**: Si el miembro expreso una opinión explícita, resume brevemente la discusión o consenso general. Si en este tema o personaje el miembro NO expresó una opinión explícita, indícalo claramente escribiendo "Sin opinión directa de [Nombre del Miembro]" y proporciona un resumen conciso de las ideas, debates o el consenso general que expresó el resto del grupo sobre ese punto en particular.
+
+     Restricciones de formato para el Markdown de las Notas:
+     - Asegúrate de atribuir correctamente cada idea a su speaker. No mezcles las opiniones de otros miembros con las del miembro propietario de la nota.
+     - Utiliza un formato estructurado en Markdown, con encabezados claros (##) para separar Temas Debatidos, Análisis de Personajes y Desglose de Posturas tal y como se detalla arriba.
+     - Usa viñetas para que la información sea altamente escaneable y directa.
 4. Si hay algún "Invitado", genera lo mismo para él.
 
 Debes devolver tu respuesta estrictamente en formato JSON con la siguiente estructura exacta:
@@ -1030,7 +1055,7 @@ Debes devolver tu respuesta estrictamente en formato JSON con la siguiente estru
       "id": "Nombre del Miembro" (ej. "Jaime", "Almu", etc.),
       "voiceSnippet": "Una cita directa representativa de este hablante de la transcripción.",
       "summary": "Resumen en primera persona singular...",
-      "notesMarkdown": "Documento Markdown en primera persona singular..."
+      "notesMarkdown": "Documento Markdown estructurado con el formato y secciones solicitadas..."
     }
   ]
 }
@@ -1039,7 +1064,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
 `;
 
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey.trim()}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey.trim()}`,
         {
           method: 'POST',
           headers: {
