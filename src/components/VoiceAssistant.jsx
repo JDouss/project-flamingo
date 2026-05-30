@@ -576,25 +576,58 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
           setStatus('analyzing');
           setProgressMsg('Iniciando transcripción con GCP Speech-to-Text API (Diarization)...');
           
-          // Construct GCS URI
+          // Determine audio encoding from file extension
+          const fileExt = audioFile.name.toLowerCase().split('.').pop();
+          let encoding = 'ENCODING_UNSPECIFIED';
+          let sampleRateHertz = undefined; // let API auto-detect when possible
+          switch (fileExt) {
+            case 'mp3':
+              encoding = 'MP3';
+              break;
+            case 'flac':
+              encoding = 'FLAC';
+              break;
+            case 'ogg':
+              encoding = 'OGG_OPUS';
+              break;
+            case 'wav':
+              encoding = 'LINEAR16';
+              break;
+            case 'm4a':
+              // m4a (AAC) is not directly supported by STT v1, 
+              // but we'll try MP3 encoding as closest match
+              encoding = 'MP3';
+              break;
+            default:
+              encoding = 'MP3'; // reasonable default for most audio files
+          }
+
+          // Construct GCS URI from the Firebase Storage download URL
           const bucketName = import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "project-flamingo-497112.firebasestorage.app";
           let filePath = "";
+          let useGcsUri = false;
+          
           try {
             const urlObj = new URL(audioUrl);
-            const pathParts = urlObj.pathname.split('/o/');
-            if (pathParts.length > 1) {
-              filePath = decodeURIComponent(pathParts[1].split('?')[0]);
+            // Handle old format: https://firebasestorage.googleapis.com/v0/b/BUCKET/o/PATH?...
+            if (urlObj.hostname === 'firebasestorage.googleapis.com') {
+              const pathParts = urlObj.pathname.split('/o/');
+              if (pathParts.length > 1) {
+                filePath = decodeURIComponent(pathParts[1].split('?')[0]);
+                useGcsUri = true;
+              }
+            }
+            // Handle new format: https://BUCKET/v0/b/BUCKET/o/PATH or similar
+            else if (urlObj.hostname.includes('firebasestorage') || urlObj.hostname.includes(bucketName)) {
+              const pathParts = urlObj.pathname.split('/o/');
+              if (pathParts.length > 1) {
+                filePath = decodeURIComponent(pathParts[1].split('?')[0]);
+                useGcsUri = true;
+              }
             }
           } catch (e) {
             console.warn("Failed to parse file path from URL:", e);
           }
-
-          if (!filePath) {
-            filePath = `recordings/${audioFile.name}`;
-          }
-
-          const gcsUri = `gs://${bucketName}/${filePath}`;
-          console.log("Speech-to-Text GCS URI:", gcsUri);
 
           // Get GCP API key specifically for Speech-to-Text, falling back to Firebase API key
           const gcpApiKey = import.meta.env.VITE_GCP_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY || "";
@@ -612,7 +645,42 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
               maxSpeakerCount = count;
             }
           }
-          console.log(`Setting diarization config: minSpeakerCount=${minSpeakerCount}, maxSpeakerCount=${maxSpeakerCount}`);
+          console.log(`Setting diarization config: minSpeakerCount=${minSpeakerCount}, maxSpeakerCount=${maxSpeakerCount}, encoding=${encoding}, model=latest_long`);
+
+          // Build the audio source — prefer GCS URI, fallback to inline base64 content
+          let audioSource;
+          if (useGcsUri && filePath) {
+            const gcsUri = `gs://${bucketName}/${filePath}`;
+            console.log("Speech-to-Text using GCS URI:", gcsUri);
+            audioSource = { uri: gcsUri };
+          } else {
+            // Fallback: send audio as inline base64 content
+            console.log("Speech-to-Text using inline base64 content (no valid GCS URI)");
+            setProgressMsg('Codificando audio para envío directo a GCP STT...');
+            const base64Audio = await fileToBase64(audioFile);
+            audioSource = { content: base64Audio };
+          }
+
+          // Build config
+          const sttConfig = {
+            encoding: encoding,
+            languageCode: "es-ES",
+            enableAutomaticPunctuation: true,
+            model: "latest_long",
+            useEnhanced: true,
+            diarizationConfig: {
+              enableSpeakerDiarization: true,
+              minSpeakerCount: minSpeakerCount,
+              maxSpeakerCount: maxSpeakerCount
+            }
+          };
+
+          // Only include sampleRateHertz if explicitly set (WAV files)
+          if (sampleRateHertz) {
+            sttConfig.sampleRateHertz = sampleRateHertz;
+          }
+
+          console.log("STT Request config:", JSON.stringify(sttConfig, null, 2));
 
           // Call Speech-to-Text API longrunningrecognize
           const sttRes = await fetch(
@@ -623,17 +691,8 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                config: {
-                  languageCode: "es-ES",
-                  diarizationConfig: {
-                    enableSpeakerDiarization: true,
-                    minSpeakerCount: minSpeakerCount,
-                    maxSpeakerCount: maxSpeakerCount
-                  }
-                },
-                audio: {
-                  uri: gcsUri
-                }
+                config: sttConfig,
+                audio: audioSource
               })
             }
           );
