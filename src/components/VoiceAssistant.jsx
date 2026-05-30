@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { X, Key, UploadCloud, FileAudio, AlertTriangle, Sparkles, Check, Loader2, Volume2, ArrowRight, Mic, Square, Play, Trash2, Save, User, FileUp } from 'lucide-react';
+import { X, Key, UploadCloud, FileAudio, AlertTriangle, Sparkles, Check, Loader2, Volume2, ArrowRight, Mic, Square, Play, Trash2, Save, User, FileUp, Star, Plus } from 'lucide-react';
 import { db, storage } from '../firebase';
 import { collection, addDoc, getDocs, query, orderBy, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { renderMarkdown } from '../utils/markdown';
 
-export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMode, bookId, books = [], onApplyNotesToBook }) {
+export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMode, bookId, books = [], onApplyNotesToBook, onCreateBookFromSession }) {
   const [apiKey, setApiKey] = useState(() => {
     return import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY || localStorage.getItem('flamingo_gemini_api_key') || '';
   });
@@ -74,11 +74,27 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
     };
   }, [status]);
   
-  // Results
   const [analysisResult, setAnalysisResult] = useState(null);
   const [selectedSpeakerId, setSelectedSpeakerId] = useState(null);
   const [expectedSpeakers, setExpectedSpeakers] = useState('auto');
   const [targetBookId, setTargetBookId] = useState('');
+  const [savedTranscriptionId, setSavedTranscriptionId] = useState(null);
+  const [newBookTitle, setNewBookTitle] = useState('');
+  const [newBookAuthor, setNewBookAuthor] = useState('');
+  const [newBookGenre, setNewBookGenre] = useState('');
+
+  // Sync deduced book data when analysisResult changes
+  useEffect(() => {
+    if (analysisResult) {
+      setNewBookTitle(analysisResult.bookTitle || '');
+      setNewBookAuthor(analysisResult.bookAuthor || '');
+      setNewBookGenre(analysisResult.bookGenre || '');
+    } else {
+      setNewBookTitle('');
+      setNewBookAuthor('');
+      setNewBookGenre('');
+    }
+  }, [analysisResult]);
 
   // Raw API Recovery states
   const [rawResponse, setRawResponse] = useState('');
@@ -520,8 +536,12 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
       audioName: audioFile ? audioFile.name : 'audio_grabacion.mp3',
       audioUrl: audioUrl || '',
       generalSummary: parsedResult.generalSummary || '',
+      sessionSummaryMarkdown: parsedResult.sessionSummaryMarkdown || '',
+      bookTitle: parsedResult.bookTitle || null,
+      bookAuthor: parsedResult.bookAuthor || null,
+      bookGenre: parsedResult.bookGenre || null,
       transcript: finalTranscript || '',
-      attendees: parsedResult.speakers || [],
+      attendees: parsedResult.speakers || [], // Retrocompatibility
       grades: parsedResult.grades || { start: {}, end: {} },
       result: parsedResult, // Keep result field for backward compatibility
       createdAt: new Date().toISOString()
@@ -529,15 +549,21 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
 
     try {
       if (!isDemoMode) {
-        await addDoc(collection(db, 'transcriptions'), transcriptionData);
+        const docRef = await addDoc(collection(db, 'transcriptions'), transcriptionData);
+        fetchHistory(); // Refresh history
+        return docRef.id;
       } else {
+        const generatedId = 'demo_trans_' + Date.now();
+        transcriptionData.id = generatedId;
         const currentHistory = JSON.parse(localStorage.getItem('flamingo_transcription_history') || '[]');
         currentHistory.unshift(transcriptionData);
         localStorage.setItem('flamingo_transcription_history', JSON.stringify(currentHistory));
+        fetchHistory(); // Refresh history
+        return generatedId;
       }
-      fetchHistory(); // Refresh history
     } catch (err) {
       console.error("Error al guardar la transcripción en el historial:", err);
+      return null;
     }
   };
 
@@ -1037,17 +1063,36 @@ Devuelve únicamente el texto de la transcripción, sin ningún formato adiciona
         });
 
         const parsedResult = {
+          bookTitle: "La Sombra del Viento",
+          bookAuthor: "Carlos Ruiz Zafón",
+          bookGenre: "Misterio",
           generalSummary: `Simulación de discusión grupal. Los participantes debatieron ampliamente sobre el libro del club de lectura, analizando sus temáticas clave, el desarrollo estilístico y compartiendo sus perspectivas individuales.`,
           grades: mockGrades,
-          speakers: mockSpeakers
+          sessionSummaryMarkdown: `# Memoria y Resumen del Debate - La Sombra del Viento
+
+## Resumen Ejecutivo de la Sesión
+- Debate muy dinámico y apasionado sobre la novela. La sesión duró aproximadamente 2 horas con la asistencia de todos los miembros fijos.
+
+## Calificaciones y Evolución
+- La valoración del grupo mejoró de forma generalizada tras analizar los personajes secundarios y la estructura del cementerio de los libros olvidados.
+
+## Temas Debatidos y Posturas Individuales
+### Tema: Estructura Narrativa y Ritmo
+- **Contexto del debate**: La dosificación del misterio y la extensión de la parte central.
+- **Opiniones de los miembros**:
+  * **Jaime**: Sostuvo que el ritmo de la novela es perfecto y mantiene el suspense hasta la última página.
+  * **Almu**: Destacó la belleza de las descripciones literarias de la Barcelona gótica.
+- **Consenso**: Coincidencia generalizada en que el libro es sumamente adictivo.`,
+          speakers: mockSpeakers // Keep for retrocompatibility
         };
 
         setAnalysisResult(parsedResult);
         setStatus('success');
-        setSelectedSpeakerId(parsedResult.speakers[0]?.id || null);
+        setSelectedSpeakerId(null);
 
         // Save session to database/localStorage
-        await saveTranscription(parsedResult, uploadedAudioUrl, mappedTranscript);
+        const savedId = await saveTranscription(parsedResult, uploadedAudioUrl, mappedTranscript);
+        setSavedTranscriptionId(savedId || 'demo_trans_id');
         return;
       }
 
@@ -1062,34 +1107,48 @@ ${mappedTranscript}
 """
 
 Instrucciones de análisis:
-1. Lee detenidamente la transcripción y extrae los temas clave discutidos, los acuerdos y desacuerdos principales.
-2. Identifica y extrae las calificaciones individuales (de 1 a 10) que cada miembro dio al inicio de la sesión (expectativas o valoración inicial) y al final de la sesión (valoración tras debatir). Busca frases como "Le doy un 7 al empezar", "Le pongo un 8 al final", "Mi nota inicial es 6", "Termino poniéndole un 8", etc. Si un miembro no da explícitamente una nota, intenta deducirla a partir de su nivel de entusiasmo en la transcripción, o devuélvela como null si no hay información alguna.
-3. Para cada miembro del club de lectura que participó en la sesión (los nombres indicados en la transcripción, tales como Jaime, Almu, Alejandro, Joaquin, Zepe):
-   - Genera un resumen de 2 o 3 frases de sus opiniones y contribuciones principales, redactado estrictamente en primera persona singular (ej. "Yo opiné que...", "Pienso que...").
-   - Genera un documento en Markdown estructurado que sirva como sus Notas de la Sesión. El foco debe estar en dicho miembro (es decir, la primera persona "Yo" y "Mi opinión" se refieren a ese miembro en particular; por ejemplo, para Jaime, "Yo" y "Mi opinión" se refieren a Jaime). Organiza el documento estrictamente bajo el siguiente esquema:
-     # Notas de la Sesión - [Nombre del Miembro]
-     
-     ## Temas Debatidos
-     - Extrae los temas principales y subtemas que se han debatido durante la reunión. Resume brevemente qué ángulos se tocaron sobre cada uno y quién los introdujo. Asegúrate de atribuir correctamente cada idea a su speaker en el texto.
-     
-     ## Análisis de Personajes
-     - Lista los personajes de la obra que se han discutido. Resume las diferentes interpretaciones, críticas o defensas que surgieron sobre sus acciones y psicología.
-     
-     ## Desglose de Posturas
-     - Para cada tema y personaje mencionado en las secciones anteriores, haz un contraste explícito bajo el siguiente formato:
-       * **[Nombre del Tema o Personaje]**:
-         - **Mi opinión**: Extrae la postura específica de este miembro en primera persona (ej. "Yo opiné que...", "Mi postura fue..."), detallando sus argumentos e ideas aportadas.
-         - **Ideas generales**: Si el miembro expreso una opinión explícita, resume brevemente la discusión o consenso general. Si en este tema o personaje el miembro NO expresó una opinión explícita, indícalo claramente escribiendo "Sin opinión directa de [Nombre del Miembro]" y proporciona un resumen conciso de las ideas, debates o el consenso general que expresó el resto del grupo sobre ese punto en particular.
+1. Deduce el Título del Libro, el Autor del Libro y el Género a partir del contexto del debate de la sesión.
+2. Lee detenidamente la transcripción y extrae los temas clave discutidos, los acuerdos y desacuerdos principales.
+3. Identifica y extrae las calificaciones individuales (de 1 a 10) que cada miembro dio al inicio de la sesión (expectativas o valoración inicial) y al final de la sesión (valoración tras debatir). Busca frases como "Le doy un 7 al empezar", "Le pongo un 8 al final", "Mi nota inicial es 6", "Termino poniéndole un 8", etc. Si un miembro no da explícitamente una nota, intenta deducirla a partir de su nivel de entusiasmo en la transcripción, o devuélvela como null si no hay información alguna.
+4. Genera un documento único en Markdown estructurado y EXTENSO que sirva como la Memoria y Resumen del Debate de la Sesión. El documento debe detallar en profundidad qué opinó cada miembro en cada tema y personaje discutido (evitando resúmenes abstractos y nombrando explícitamente quién defendió qué argumento con detalles exactos de la trama y la discusión). Organiza el documento estrictamente bajo el siguiente esquema:
 
-     Restricciones de formato para el Markdown de las Notas:
-     - Asegúrate de atribuir correctamente cada idea a su speaker. No mezcles las opiniones de otros miembros con las del miembro propietario de la nota.
-     - Utiliza un formato estructurado en Markdown, con encabezados claros (##) para separar Temas Debatidos, Análisis de Personajes y Desglose de Posturas tal y como se detalla arriba.
-     - Usa viñetas para que la información sea altamente escaneable y directa.
-4. Si hay algún "Invitado", genera lo mismo para él.
+   # Memoria y Resumen del Debate - [Título del Libro]
+
+   ## Resumen Ejecutivo de la Sesión
+   - Un párrafo descriptivo del tono, asistencia, duración estimada y conclusiones globales del debate.
+
+   ## Calificaciones y Evolución
+   - Breve comentario sobre cómo variaron las notas (si hubo grandes cambios de opinión o consenso generalizado).
+
+   ## Temas Debatidos y Posturas Individuales
+   Para cada uno de los temas clave discutidos (por ejemplo, "Estructura Narrativa", "Estilo Literario", "Mensaje Social", etc.), desarrolla de manera muy detallada y concreta:
+   ### Tema: [Nombre del Tema]
+   - **Contexto del debate**: Qué aspecto concreto del libro se discutió.
+   - **Opiniones de los miembros**:
+     * **[Nombre del Miembro 1]**: Postura detallada con sus argumentos exactos y referencias a momentos de la sesión.
+     * **[Nombre del Miembro 2]**: Postura detallada con sus argumentos exactos y referencias a momentos de la sesión.
+     * ...
+   - **Consenso y Conclusiones del Grupo**: Cuál fue el acuerdo o desacuerdo general sobre este tema específico.
+
+   ## Análisis de Personajes y su Psicología
+   Para cada personaje de la obra analizado durante la sesión:
+   ### Personaje: [Nombre del Personaje]
+   - **Interpretaciones del grupo**: Cómo se percibieron sus acciones y psicología.
+   - **Posturas individuales**:
+     * **[Nombre del Miembro 1]**: Qué opinó sobre él/ella, su defensa o críticas.
+     * **[Nombre del Miembro 2]**: Qué opinó sobre él/ella, su defensa o críticas.
+     * ...
+   - **Conclusión y debate**: Grado de acuerdo sobre este personaje.
+
+   ## Acuerdos Generales, Puntos Clave y Citas Destacadas
+   - Lista detallada y extensa de los puntos clave acordados o reflexiones más interesantes de la sesión, incluyendo citas textuales o parafraseadas memorables de los participantes si las hay.
 
 Debes devolver tu respuesta estrictamente en formato JSON con la siguiente estructura exacta:
 {
-  "generalSummary": "Un resumen general de la sesión, los temas discutidos, conclusiones y dinámica del grupo.",
+  "bookTitle": "Título del libro deducido (string o null si no se identifica)",
+  "bookAuthor": "Autor del libro deducido (string o null si no se identifica)",
+  "bookGenre": "Género literario deducido (string o null si no se identifica)",
+  "generalSummary": "Un resumen ejecutivo breve y conciso de la sesión, conclusiones y dinámica del grupo.",
   "grades": {
     "start": {
       "Nombre del Miembro": 8,
@@ -1100,17 +1159,10 @@ Debes devolver tu respuesta estrictamente en formato JSON con la siguiente estru
       ...
     }
   },
-  "speakers": [
-    {
-      "id": "Nombre del Miembro" (ej. "Jaime", "Almu", etc.),
-      "voiceSnippet": "Una cita directa representativa de este hablante de la transcripción.",
-      "summary": "Resumen en primera persona singular...",
-      "notesMarkdown": "Documento Markdown estructurado con el formato y secciones solicitadas..."
-    }
-  ]
+  "sessionSummaryMarkdown": "Documento Markdown estructurado, extenso e increíblemente detallado con el formato y secciones solicitadas arriba..."
 }
 
-Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente escapado dentro del JSON. Todo el contenido generado DEBE estar en español. No incluyes ningún envoltorio de markdown como \`\`\`json. Devuelve únicamente el JSON crudo.
+Asegúrate de que 'sessionSummaryMarkdown' sea texto Markdown válido y correctamente escapado dentro del JSON. Todo el contenido generado DEBE estar en español. No incluyes ningún envoltorio de markdown como \`\`\`json. Devuelve únicamente el JSON crudo.
 `;
 
       const response = await fetch(
@@ -1151,8 +1203,11 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
 
       // Parse JSON
       const parsedResult = parseGeminiResponse(textResponse);
-      if (!parsedResult?.speakers || parsedResult.speakers.length === 0) {
-        throw new Error('No se pudo extraer la estructura de hablantes de la respuesta de la API.');
+      const hasSpeakers = parsedResult?.speakers && parsedResult.speakers.length > 0;
+      const hasSummary = !!parsedResult?.sessionSummaryMarkdown;
+      
+      if (!hasSpeakers && !hasSummary) {
+        throw new Error('No se pudo extraer el resumen de la sesión o la estructura de participantes de la respuesta de la API.');
       }
 
       if (!parsedResult.generalSummary) {
@@ -1161,10 +1216,11 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
 
       setAnalysisResult(parsedResult);
       setStatus('success');
-      setSelectedSpeakerId(parsedResult.speakers[0]?.id || null);
+      setSelectedSpeakerId(hasSpeakers && !hasSummary ? parsedResult.speakers[0]?.id : null);
 
       // Save session to database/localStorage
-      await saveTranscription(parsedResult, uploadedAudioUrl, mappedTranscript);
+      const savedId = await saveTranscription(parsedResult, uploadedAudioUrl, mappedTranscript);
+      setSavedTranscriptionId(savedId);
     } catch (err) {
       console.error('Final analysis processing error:', err);
       let msg = err.message || 'Ocurrió un error al generar el análisis final de la sesión.';
@@ -1215,7 +1271,35 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
 
   // Helper to parse LLM JSON (strips out potential markdown ticks)
   const parseGeminiResponseFallback = (text) => {
+    const extractFieldFromWholeText = (fieldName, sourceText) => {
+      const marker = new RegExp(`"${fieldName}"\\s*:\\s*"`, 'i');
+      const match = sourceText.match(marker);
+      if (!match) return "";
+      const startIdx = match.index + match[0].length;
+      const subText = sourceText.substring(startIdx);
+      let endIdx = -1;
+      for (let i = 0; i < subText.length; i++) {
+        if (subText[i] === '"' && (i === 0 || subText[i - 1] !== '\\')) {
+          endIdx = i;
+          break;
+        }
+      }
+      if (endIdx === -1) return "";
+      return subText.substring(0, endIdx)
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, '\n')
+        .replace(/\\t/g, '\t')
+        .replace(/\\\\/g, '\\')
+        .trim();
+    };
+
     try {
+      const generalSummary = extractFieldFromWholeText("generalSummary", text);
+      const sessionSummaryMarkdown = extractFieldFromWholeText("sessionSummaryMarkdown", text);
+      const bookTitle = extractFieldFromWholeText("bookTitle", text) || null;
+      const bookAuthor = extractFieldFromWholeText("bookAuthor", text) || null;
+      const bookGenre = extractFieldFromWholeText("bookGenre", text) || null;
+
       const speakers = [];
       const speakerSplits = text.split(/"id"\s*:\s*/i);
       
@@ -1290,8 +1374,16 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
         });
       }
       
-      if (speakers.length > 0) {
-        return { speakers };
+      const resultObj = {};
+      if (generalSummary) resultObj.generalSummary = generalSummary;
+      if (sessionSummaryMarkdown) resultObj.sessionSummaryMarkdown = sessionSummaryMarkdown;
+      if (bookTitle) resultObj.bookTitle = bookTitle;
+      if (bookAuthor) resultObj.bookAuthor = bookAuthor;
+      if (bookGenre) resultObj.bookGenre = bookGenre;
+      if (speakers.length > 0) resultObj.speakers = speakers;
+      
+      if (Object.keys(resultObj).length > 0) {
+        return resultObj;
       }
       return null;
     } catch (err) {
@@ -1329,15 +1421,19 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
     setErrorMsg('');
     try {
       const parsedResult = parseGeminiResponse(editableRawResponse);
-      if (!parsedResult?.speakers || parsedResult.speakers.length === 0) {
-        throw new Error('No se pudo extraer la estructura de hablantes del texto.');
+      const hasSpeakers = parsedResult?.speakers && parsedResult.speakers.length > 0;
+      const hasSummary = !!parsedResult?.sessionSummaryMarkdown;
+      
+      if (!hasSpeakers && !hasSummary) {
+        throw new Error('No se pudo extraer el resumen de la sesión o la estructura de participantes del texto.');
       }
       setAnalysisResult(parsedResult);
       setStatus('success');
       setShowRawEditor(false);
 
       // Save transcription to database/localStorage
-      await saveTranscription(parsedResult, uploadedAudioUrl);
+      const savedId = await saveTranscription(parsedResult, uploadedAudioUrl);
+      setSavedTranscriptionId(savedId);
     } catch (err) {
       console.error('Manual reparse failed:', err);
       setErrorMsg(`Error al volver a analizar: ${err.message}. Si el JSON está mal formado, puedes intentar editarlo abajo para corregir los errores de sintaxis.`);
@@ -1618,40 +1714,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                     </button>
                   )}
 
-                  {/* Option to simulate 5 speakers */}
-                  <div style={{
-                    marginTop: '1.5rem',
-                    padding: '1rem',
-                    border: '1px dashed var(--primary)',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'rgba(255, 42, 122, 0.04)',
-                    textAlign: 'center',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '0.5rem'
-                  }}>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
-                      🧪 ¿Quieres probar la interfaz con múltiples miembros y audio inmediatamente?
-                    </p>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={handleSimulate5Speakers}
-                      style={{ 
-                        fontSize: '0.8rem', 
-                        padding: '0.4rem 1rem', 
-                        borderColor: 'var(--primary)', 
-                        color: 'var(--primary)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.35rem',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <Sparkles size={12} /> Simular conversación con 5 Miembros
-                    </button>
-                  </div>
+
                 </div>
               ) : status === 'mapping' ? (
                 <div style={{ marginTop: '1.5rem', textAlign: 'left' }}>
@@ -1926,191 +1989,446 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                     </details>
                   )}
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                    <h4 className="serif-title" style={{ fontSize: '1.2rem', margin: 0, textAlign: 'center', width: '100%' }}>
-                      ¿Quién eres tú en esta grabación?
-                    </h4>
-                  </div>
-                  
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem', textAlign: 'center' }}>
-                    Selecciona tu miembro abajo para revisar tus opiniones y ver/copiar tus notas detalladas.
-                  </p>
+                  {(() => {
+                    const isNewFormat = !!(analysisResult.sessionSummaryMarkdown || analysisResult.result?.sessionSummaryMarkdown);
+                    const markdown = isNewFormat 
+                      ? (analysisResult.sessionSummaryMarkdown || analysisResult.result?.sessionSummaryMarkdown || '') 
+                      : (speakersList.find(s => s.id === selectedSpeakerId)?.notesMarkdown || '');
+                    const grades = analysisResult.grades || analysisResult.result?.grades || null;
+                    const genSummary = analysisResult.generalSummary || analysisResult.result?.generalSummary || null;
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                    {speakersList.map((speaker) => {
-                      const isSelected = selectedSpeakerId === speaker.id;
-                      // Display number or letter indicator
-                      const avatarText = speaker.id.match(/\d+/) 
-                        ? speaker.id.match(/\d+/)[0] 
-                        : (speaker.id.match(/[A-Z]/) ? speaker.id.match(/[A-Z]/)[0] : 'S');
-
+                    if (isNewFormat) {
                       return (
-                        <div 
-                          key={speaker.id} 
-                          className={`voice-speaker-card ${isSelected ? 'selected' : ''}`}
-                          onClick={() => setSelectedSpeakerId(speaker.id)}
-                          style={{ cursor: 'pointer', border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border)' }}
-                        >
-                          <div className="voice-speaker-header">
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                              <div className={`voice-speaker-avatar ${isSelected ? 'active' : ''}`}>
-                                {avatarText}
-                              </div>
-                              <div style={{ textAlign: 'left' }}>
-                                <p style={{ fontWeight: '700', fontSize: '0.95rem', margin: 0 }}>{speaker.id}</p>
-                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>Participante del club de lectura</p>
-                              </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                          {/* Shared Session Summary Display */}
+                          <div style={{
+                            padding: '1.25rem',
+                            border: '1px solid var(--border)',
+                            borderRadius: 'var(--radius-md)',
+                            background: '#FAF6EE', // light soft cream
+                            boxShadow: 'var(--shadow-sm)',
+                            textAlign: 'left'
+                          }}>
+                            <h5 className="serif-title" style={{ fontSize: '1.25rem', marginBottom: '0.75rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <Sparkles size={18} /> Memoria y Resumen del Debate
+                            </h5>
+                            
+                            <div className="voice-notes-markdown-preview" style={{
+                              maxHeight: '400px',
+                              overflowY: 'auto',
+                              padding: '1rem',
+                              background: '#ffffff',
+                              border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius-sm)',
+                              fontSize: '0.875rem',
+                              lineHeight: '1.6',
+                              marginBottom: '1rem',
+                              color: 'var(--text-primary)'
+                            }}>
+                              {renderMarkdown(markdown)}
                             </div>
-                            {isSelected && (
-                              <span className="voice-badge-applied">
-                                <Check size={12} /> Seleccionado
-                              </span>
-                            )}
+
+                            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', height: 'auto' }}
+                                onClick={() => {
+                                  if (markdown) {
+                                    navigator.clipboard.writeText(markdown);
+                                    alert("¡Resumen de sesión copiado al portapapeles con éxito!");
+                                  }
+                                }}
+                              >
+                                Copiar memoria de sesión
+                              </button>
+                            </div>
                           </div>
 
-                          {/* Voice snippet */}
-                          <div className="voice-speaker-snippet" style={{ textAlign: 'left' }}>
-                            <Volume2 size={14} style={{ color: 'var(--primary)', flexShrink: 0, marginTop: '0.2rem' }} />
-                            <span style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>
-                              “{speaker.voiceSnippet}”
-                            </span>
-                          </div>
+                          {/* Grades Table */}
+                          {grades && (() => {
+                            const startGrades = grades.start || {};
+                            const endGrades = grades.end || {};
+                            const membersList = Object.keys({ ...startGrades, ...endGrades }).filter(
+                              m => (startGrades[m] !== undefined && startGrades[m] !== null && startGrades[m] !== '') || 
+                                   (endGrades[m] !== undefined && endGrades[m] !== null && endGrades[m] !== '')
+                            );
+                            if (membersList.length === 0) return null;
+                            return (
+                              <div style={{ padding: '1.25rem', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', textAlign: 'left' }}>
+                                <h5 className="serif-title" style={{ fontSize: '1.05rem', color: 'var(--primary)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                  <Star size={16} fill="var(--primary)" /> Calificaciones del Debate Extraídas (1-10)
+                                </h5>
+                                <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
+                                  <thead>
+                                    <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', textAlign: 'left' }}>
+                                      <th style={{ padding: '0.5rem 0.25rem' }}>Hablante</th>
+                                      <th style={{ padding: '0.5rem 0.25rem', textAlign: 'center' }}>Nota Inicial</th>
+                                      <th style={{ padding: '0.5rem 0.25rem', textAlign: 'center' }}>Nota Final</th>
+                                      <th style={{ padding: '0.5rem 0.25rem', textAlign: 'center' }}>Cambio</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {membersList.map(m => {
+                                      const start = startGrades[m];
+                                      const end = endGrades[m];
+                                      const diff = (typeof start === 'number' && typeof end === 'number') ? (end - start) : null;
+                                      return (
+                                        <tr key={m} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                                          <td style={{ padding: '0.5rem 0.25rem', fontWeight: 'bold' }}>{m}</td>
+                                          <td style={{ padding: '0.5rem 0.25rem', textAlign: 'center', color: '#fb923c', fontWeight: '500' }}>
+                                            {typeof start === 'number' ? start.toFixed(1) : '—'}
+                                          </td>
+                                          <td style={{ padding: '0.5rem 0.25rem', textAlign: 'center', color: '#34d399', fontWeight: '500' }}>
+                                            {typeof end === 'number' ? end.toFixed(1) : '—'}
+                                          </td>
+                                          <td style={{ padding: '0.5rem 0.25rem', textAlign: 'center', fontWeight: 'bold', color: diff >= 0 ? '#34d399' : '#fb7185' }}>
+                                            {diff !== null ? (diff >= 0 ? `+${diff.toFixed(1)}` : diff.toFixed(1)) : '—'}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            );
+                          })()}
 
-                          {/* Summary */}
-                          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.5', margin: '0.75rem 0', textAlign: 'left' }}>
-                            <strong>Opiniones clave (en primera persona):</strong> {speaker.summary}
-                          </div>
+                          {/* Save & Apply Options */}
+                          {onApplyNotes ? (
+                            /* Editing Book Form Mode */
+                            <div style={{ marginTop: '0.5rem' }}>
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                style={{ width: '100%', display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
+                                onClick={() => {
+                                  onApplyNotes(markdown);
+                                  onClose();
+                                }}
+                              >
+                                <Check size={16} /> Aplicar Memoria de la Sesión al Formulario
+                              </button>
+                            </div>
+                          ) : (
+                            /* General Modal Mode */
+                            <div style={{
+                              padding: '1.25rem',
+                              border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius-md)',
+                              background: 'var(--bg-secondary)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '1rem',
+                              textAlign: 'left'
+                            }}>
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>
+                                  Guardar o aplicar memoria del debate:
+                                </label>
+                                <select
+                                  className="form-select"
+                                  value={targetBookId}
+                                  onChange={(e) => setTargetBookId(e.target.value)}
+                                  style={{ width: '100%', fontSize: '0.85rem', background: 'var(--bg-card)', color: 'var(--text-primary)', borderColor: 'var(--border)' }}
+                                >
+                                  <option value="">-- Seleccionar opción --</option>
+                                  <option value="create_new">✨ -- Crear nueva reseña a partir de esta sesión --</option>
+                                  {books && books.length > 0 && (
+                                    <optgroup label="Reseñas Existentes">
+                                      {books.map(b => (
+                                        <option key={b.id} value={b.id}>{b.title} - {b.author}</option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                </select>
+                              </div>
+
+                              {/* Create New Book Fields */}
+                              {targetBookId === 'create_new' && (
+                                <div style={{
+                                  padding: '1rem',
+                                  background: 'var(--bg-card)',
+                                  border: '1px solid var(--border)',
+                                  borderRadius: 'var(--radius-sm)',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '0.75rem',
+                                  animation: 'fadeIn var(--transition-normal)'
+                                }}>
+                                  <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="form-label" style={{ fontSize: '0.8rem' }}>Título del libro *</label>
+                                    <input
+                                      type="text"
+                                      className="form-input"
+                                      style={{ padding: '0.4rem 0.6rem', fontSize: '0.85rem' }}
+                                      value={newBookTitle}
+                                      onChange={(e) => setNewBookTitle(e.target.value)}
+                                      placeholder="ej. La Sombra del Viento"
+                                    />
+                                  </div>
+                                  <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="form-label" style={{ fontSize: '0.8rem' }}>Autor *</label>
+                                    <input
+                                      type="text"
+                                      className="form-input"
+                                      style={{ padding: '0.4rem 0.6rem', fontSize: '0.85rem' }}
+                                      value={newBookAuthor}
+                                      onChange={(e) => setNewBookAuthor(e.target.value)}
+                                      placeholder="ej. Carlos Ruiz Zafón"
+                                    />
+                                  </div>
+                                  <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="form-label" style={{ fontSize: '0.8rem' }}>Género *</label>
+                                    <input
+                                      type="text"
+                                      className="form-input"
+                                      style={{ padding: '0.4rem 0.6rem', fontSize: '0.85rem' }}
+                                      value={newBookGenre}
+                                      onChange={(e) => setNewBookGenre(e.target.value)}
+                                      placeholder="ej. Misterio, Intriga"
+                                    />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    disabled={!newBookTitle.trim() || !newBookAuthor.trim()}
+                                    style={{ marginTop: '0.5rem', width: '100%', fontSize: '0.85rem', display: 'flex', gap: '0.35rem', justifyContent: 'center', alignItems: 'center' }}
+                                    onClick={async () => {
+                                      if (onCreateBookFromSession) {
+                                        try {
+                                          const createdId = await onCreateBookFromSession(
+                                            newBookTitle,
+                                            newBookAuthor,
+                                            newBookGenre,
+                                            markdown,
+                                            grades,
+                                            genSummary,
+                                            savedTranscriptionId
+                                          );
+                                          alert("¡Reseña creada y memoria de la sesión guardada con éxito!");
+                                          onClose();
+                                        } catch (err) {
+                                          alert("Error al crear la reseña: " + err.message);
+                                        }
+                                      }
+                                    }}
+                                  >
+                                    <Plus size={14} /> Crear Reseña y Guardar Memoria
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Apply to Existing Book Button */}
+                              {targetBookId && targetBookId !== 'create_new' && (
+                                <button
+                                  type="button"
+                                  className="btn btn-primary"
+                                  style={{ width: '100%', fontSize: '0.85rem', display: 'flex', gap: '0.35rem', justifyContent: 'center', alignItems: 'center' }}
+                                  onClick={async () => {
+                                    if (onApplyNotesToBook) {
+                                      try {
+                                        await onApplyNotesToBook(targetBookId, markdown, grades, genSummary, savedTranscriptionId);
+                                        alert("¡Memoria de la sesión aplicada con éxito al libro!");
+                                        onClose();
+                                      } catch (err) {
+                                        alert("Error al aplicar las notas: " + err.message);
+                                      }
+                                    }
+                                  }}
+                                >
+                                  <Check size={14} /> Aplicar Memoria a Reseña Existente
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
-                    })}
-                  </div>
+                    } else {
+                      /* Old Format Fallback (Individual Private Notes) */
+                      return (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <h4 className="serif-title" style={{ fontSize: '1.2rem', margin: 0, textAlign: 'center', width: '100%' }}>
+                              ¿Quién eres tú en esta grabación? (Formato antiguo)
+                            </h4>
+                          </div>
+                          
+                          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem', textAlign: 'center' }}>
+                            Selecciona tu miembro abajo para revisar tus opiniones y ver/copiar tus notas detalladas.
+                          </p>
 
-                  {/* Notes Markdown Preview Container */}
-                  {selectedSpeakerId && (
-                    <div style={{
-                      marginTop: '1.5rem',
-                      padding: '1.25rem',
-                      border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius-md)',
-                      background: '#FAF6EE', // light soft cream
-                      boxShadow: 'var(--shadow-sm)',
-                      textAlign: 'left'
-                    }}>
-                      <h5 className="serif-title" style={{ fontSize: '1.15rem', marginBottom: '0.75rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Sparkles size={16} /> Notas preliminares privadas de {selectedSpeakerId}
-                      </h5>
-                      
-                      <div className="voice-notes-markdown-preview" style={{
-                        maxHeight: '350px',
-                        overflowY: 'auto',
-                        padding: '1rem',
-                        background: '#ffffff',
-                        border: '1px solid var(--border)',
-                        borderRadius: 'var(--radius-sm)',
-                        fontSize: '0.875rem',
-                        lineHeight: '1.6',
-                        marginBottom: '1rem',
-                        color: 'var(--text-primary)'
-                      }}>
-                        {renderMarkdown(speakersList.find(s => s.id === selectedSpeakerId)?.notesMarkdown || '')}
-                      </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                            {speakersList.map((speaker) => {
+                              const isSelected = selectedSpeakerId === speaker.id;
+                              const avatarText = speaker.id.match(/\d+/) 
+                                ? speaker.id.match(/\d+/)[0] 
+                                : (speaker.id.match(/[A-Z]/) ? speaker.id.match(/[A-Z]/)[0] : 'S');
 
-                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', height: 'auto' }}
-                          onClick={() => {
-                            const markdown = speakersList.find(s => s.id === selectedSpeakerId)?.notesMarkdown;
-                            if (markdown) {
-                              navigator.clipboard.writeText(markdown);
-                              alert("¡Notas copiadas al portapapeles con éxito!");
-                            }
-                          }}
-                        >
-                          Copiar al portapapeles
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                              return (
+                                <div 
+                                  key={speaker.id} 
+                                  className={`voice-speaker-card ${isSelected ? 'selected' : ''}`}
+                                  onClick={() => setSelectedSpeakerId(speaker.id)}
+                                  style={{ cursor: 'pointer', border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border)' }}
+                                >
+                                  <div className="voice-speaker-header">
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                      <div className={`voice-speaker-avatar ${isSelected ? 'active' : ''}`}>
+                                        {avatarText}
+                                      </div>
+                                      <div style={{ textAlign: 'left' }}>
+                                        <p style={{ fontWeight: '700', fontSize: '0.95rem', margin: 0 }}>{speaker.id}</p>
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>Participante del club de lectura</p>
+                                      </div>
+                                    </div>
+                                    {isSelected && (
+                                      <span className="voice-badge-applied">
+                                        <Check size={12} /> Seleccionado
+                                      </span>
+                                    )}
+                                  </div>
 
-                  {/* Select Book Dropdown (General View Mode) */}
-                  {selectedSpeakerId && !onApplyNotes && books && books.length > 0 && (
-                    <div style={{
-                      marginTop: '1.5rem',
-                      padding: '1.25rem',
-                      border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius-md)',
-                      background: 'var(--bg-secondary)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '0.5rem',
-                      textAlign: 'left'
-                    }}>
-                      <label className="form-label" style={{ fontSize: '0.85rem', margin: 0, fontWeight: 'bold' }}>
-                        Aplicar estas notas a una reseña existente:
-                      </label>
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <select
-                          className="form-select"
-                          value={targetBookId}
-                          onChange={(e) => setTargetBookId(e.target.value)}
-                          style={{ flex: 1, fontSize: '0.85rem', background: 'var(--bg-card)', color: 'var(--text-primary)', borderColor: 'var(--border)' }}
-                        >
-                          <option value="">-- Seleccionar reseña de libro --</option>
-                          {books.map(b => (
-                            <option key={b.id} value={b.id}>{b.title} - {b.author}</option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          disabled={!targetBookId}
-                          style={{ padding: '0.5rem 1.25rem', height: 'auto', fontSize: '0.85rem' }}
-                          onClick={async () => {
-                            const markdown = speakersList.find(s => s.id === selectedSpeakerId)?.notesMarkdown;
-                            const grades = analysisResult.grades || analysisResult.result?.grades || null;
-                            const genSummary = analysisResult.generalSummary || analysisResult.result?.generalSummary || null;
-                            if (markdown && targetBookId && onApplyNotesToBook) {
-                              try {
-                                await onApplyNotesToBook(targetBookId, markdown, grades, genSummary);
-                                alert("Notas de voz aplicadas con éxito al libro.");
-                                onClose();
-                              } catch (err) {
-                                alert("Error al aplicar las notas: " + err.message);
-                              }
-                            }
-                          }}
-                        >
-                          Aplicar a Reseña
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                                  <div className="voice-speaker-snippet" style={{ textAlign: 'left' }}>
+                                    <Volume2 size={14} style={{ color: 'var(--primary)', flexShrink: 0, marginTop: '0.2rem' }} />
+                                    <span style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>
+                                      “{speaker.voiceSnippet}”
+                                    </span>
+                                  </div>
 
-                  {/* Bottom Action buttons */}
-                  <div style={{ marginTop: '2rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'center' }}>
-                    {onApplyNotes && (
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        style={{ width: '100%', maxWidth: '320px', display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
-                        disabled={!selectedSpeakerId}
-                        onClick={() => {
-                          const selectedSpeaker = speakersList.find(s => s.id === selectedSpeakerId);
-                          if (selectedSpeaker) {
-                            onApplyNotes(selectedSpeaker.notesMarkdown);
-                            onClose();
-                          }
-                        }}
-                      >
-                        <Check size={16} /> Aplicar notas de {selectedSpeakerId ? selectedSpeakerId.split(' ')[0] : '...'}
-                      </button>
-                    )}
+                                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.5', margin: '0.75rem 0', textAlign: 'left' }}>
+                                    <strong>Opiniones clave (en primera persona):</strong> {speaker.summary}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {selectedSpeakerId && (
+                            <div style={{
+                              marginTop: '1.5rem',
+                              padding: '1.25rem',
+                              border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius-md)',
+                              background: '#FAF6EE',
+                              boxShadow: 'var(--shadow-sm)',
+                              textAlign: 'left'
+                            }}>
+                              <h5 className="serif-title" style={{ fontSize: '1.15rem', marginBottom: '0.75rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <Sparkles size={16} /> Notas preliminares privadas de {selectedSpeakerId}
+                              </h5>
+                              
+                              <div className="voice-notes-markdown-preview" style={{
+                                maxHeight: '350px',
+                                overflowY: 'auto',
+                                padding: '1rem',
+                                background: '#ffffff',
+                                border: '1px solid var(--border)',
+                                borderRadius: 'var(--radius-sm)',
+                                fontSize: '0.875rem',
+                                lineHeight: '1.6',
+                                marginBottom: '1rem',
+                                color: 'var(--text-primary)'
+                              }}>
+                                {renderMarkdown(markdown)}
+                              </div>
+
+                              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', height: 'auto' }}
+                                  onClick={() => {
+                                    if (markdown) {
+                                      navigator.clipboard.writeText(markdown);
+                                      alert("¡Notas copiadas al portapapeles con éxito!");
+                                    }
+                                  }}
+                                >
+                                  Copiar al portapapeles
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {selectedSpeakerId && !onApplyNotes && books && books.length > 0 && (
+                            <div style={{
+                              marginTop: '1.5rem',
+                              padding: '1.25rem',
+                              border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius-md)',
+                              background: 'var(--bg-secondary)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.5rem',
+                              textAlign: 'left'
+                            }}>
+                              <label className="form-label" style={{ fontSize: '0.85rem', margin: 0, fontWeight: 'bold' }}>
+                                Aplicar estas notas a una reseña existente:
+                              </label>
+                              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <select
+                                  className="form-select"
+                                  value={targetBookId}
+                                  onChange={(e) => setTargetBookId(e.target.value)}
+                                  style={{ flex: 1, fontSize: '0.85rem', background: 'var(--bg-card)', color: 'var(--text-primary)', borderColor: 'var(--border)' }}
+                                >
+                                  <option value="">-- Seleccionar reseña de libro --</option>
+                                  {books.map(b => (
+                                    <option key={b.id} value={b.id}>{b.title} - {b.author}</option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary"
+                                  disabled={!targetBookId}
+                                  style={{ padding: '0.5rem 1.25rem', height: 'auto', fontSize: '0.85rem' }}
+                                  onClick={async () => {
+                                    if (markdown && targetBookId && onApplyNotesToBook) {
+                                      try {
+                                        await onApplyNotesToBook(targetBookId, markdown, grades, genSummary, savedTranscriptionId);
+                                        alert("Notas de voz aplicadas con éxito al libro.");
+                                        onClose();
+                                      } catch (err) {
+                                        alert("Error al aplicar las notas: " + err.message);
+                                      }
+                                    }
+                                  }}
+                                >
+                                  Aplicar a Reseña
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {onApplyNotes && (
+                            <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'center' }}>
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                style={{ width: '100%', maxWidth: '320px', display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
+                                disabled={!selectedSpeakerId}
+                                onClick={() => {
+                                  if (markdown) {
+                                    onApplyNotes(markdown);
+                                    onClose();
+                                  }
+                                }}
+                              >
+                                <Check size={16} /> Aplicar notas de {selectedSpeakerId ? selectedSpeakerId.split(' ')[0] : '...'}
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    }
+                  })()}
+
+                  {/* Reset/Process another button */}
+                  <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'center' }}>
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      style={{ marginTop: '0.5rem' }}
                       onClick={() => {
                         setStatus('idle');
                         setAudioFile(null);
@@ -2120,6 +2438,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                         setShowRawEditor(false);
                         setSelectedSpeakerId(null);
                         setTargetBookId('');
+                        setSavedTranscriptionId(null);
                       }}
                     >
                       Procesar otra grabación
