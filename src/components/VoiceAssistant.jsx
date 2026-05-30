@@ -841,28 +841,53 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
             throw new Error("GCP STT se completó pero no devolvió ninguna palabra.");
           }
         } catch (sttError) {
-          console.error("GCP Speech-to-Text failed:", sttError);
-          throw new Error(`Error en transcripción GCP Speech-to-Text: ${sttError.message}`);
+          console.warn("GCP Speech-to-Text failed, falling back to Gemini 3.5 Flash transcription:", sttError);
+          useGcpSst = false;
         }
       }
 
-      if (isDemoMode && !useGcpSst) {
-        setProgressMsg('Generando transcripción provisional con Gemini 3.5 Flash...');
-        const base64Data = await fileToBase64(audioFile);
-        const mainAudioPart = {
-          inlineData: {
-            mimeType: getGeminiMimeType(audioFile),
-            data: base64Data
+      if (!useGcpSst) {
+        setProgressMsg('Generando transcripción con Gemini 3.5 Flash...');
+        
+        let audioPart;
+        let uploadedGeminiFile = null;
+        
+        try {
+          // If file is larger than 15MB, upload it via Files API. Otherwise, send inline base64
+          const isLargeFile = audioFile.size > 15 * 1024 * 1024;
+          
+          if (isLargeFile) {
+            setProgressMsg('Subiendo audio a Gemini Files API (archivo grande)...');
+            uploadedGeminiFile = await uploadToGeminiFilesAPI(audioFile, apiKey);
+            
+            // Poll status until it is ACTIVE
+            setProgressMsg('Procesando audio en servidores de Gemini...');
+            await pollGeminiFileActive(uploadedGeminiFile, apiKey);
+            
+            audioPart = {
+              fileData: {
+                mimeType: uploadedGeminiFile.mimeType,
+                fileUri: uploadedGeminiFile.uri
+              }
+            };
+          } else {
+            setProgressMsg('Codificando audio para envío a Gemini...');
+            const base64Data = await fileToBase64(audioFile);
+            audioPart = {
+              inlineData: {
+                mimeType: getGeminiMimeType(audioFile),
+                data: base64Data
+              }
+            };
           }
-        };
 
-        const expectedSpeakersText = expectedSpeakers === 'auto' 
-          ? 'un número indeterminado de' 
-          : expectedSpeakers === '6' 
-            ? '6 o más' 
-            : expectedSpeakers;
+          const expectedSpeakersText = expectedSpeakers === 'auto' 
+            ? 'un número indeterminado de' 
+            : expectedSpeakers === '6' 
+              ? '6 o más' 
+              : expectedSpeakers;
 
-        const transcribePrompt = `
+          const transcribePrompt = `
 Eres un transcriptor experto. Transcribe el siguiente archivo de audio de una reunión de club de lectura en español.
 Realiza la diarización acústica para separar las intervenciones de los diferentes hablantes. En esta grabación participan exactamente ${expectedSpeakersText} miembros/voces.
 Escribe la transcripción completa de forma cronológica, etiquetando a cada hablante de forma secuencial como "[Speaker 1]", "[Speaker 2]", "[Speaker 3]", etc., según vayan apareciendo en el audio.
@@ -870,34 +895,50 @@ No intentes adivinar sus nombres reales. Limítate a transcribir exactamente lo 
 Devuelve únicamente el texto de la transcripción, sin ningún formato adicional.
 `;
 
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey.trim()}`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              contents: [
-                {
-                  parts: [mainAudioPart, { text: transcribePrompt }]
-                }
-              ]
-            })
+          setProgressMsg('Transcribiendo audio con Gemini 3.5 Flash...');
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey.trim()}`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                contents: [
+                  {
+                    parts: [audioPart, { text: transcribePrompt }]
+                  }
+                ]
+              })
+            }
+          );
+
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData?.error?.message || `Error de Gemini (${response.status})`);
           }
-        );
 
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          throw new Error(errData?.error?.message || `Error de Gemini (${response.status})`);
+          const data = await response.json();
+          gcpDiarizedTranscript = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          if (!gcpDiarizedTranscript.trim()) {
+            throw new Error("Gemini devolvió una transcripción vacía.");
+          }
+          console.log("Gemini Diarized Transcript success:", gcpDiarizedTranscript);
+          
+          // Try to delete the file after transcription to be clean (optional, don't fail if delete fails)
+          if (uploadedGeminiFile) {
+            try {
+              fetch(`https://generativelanguage.googleapis.com/v1beta/${uploadedGeminiFile.name}?key=${apiKey.trim()}`, {
+                method: 'DELETE'
+              }).catch(() => {});
+            } catch (delErr) {
+              // ignore
+            }
+          }
+        } catch (geminiError) {
+          console.error("Gemini fallback transcription failed:", geminiError);
+          throw new Error(`Error en transcripción: ${geminiError.message}`);
         }
-
-        const data = await response.json();
-        gcpDiarizedTranscript = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        if (!gcpDiarizedTranscript.trim()) {
-          throw new Error("Gemini devolvió una transcripción vacía.");
-        }
-        console.log("Gemini Diarized Transcript Fallback:", gcpDiarizedTranscript);
       }
 
       // 2. Parse speaker tags and create snippets
