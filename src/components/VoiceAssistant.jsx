@@ -658,24 +658,22 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
           const bucketName = import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "project-flamingo-497112.firebasestorage.app";
           let filePath = "";
           let useGcsUri = false;
+          let bucketFromUrl = "";
           
           try {
             const urlObj = new URL(audioUrl);
-            // Handle old format: https://firebasestorage.googleapis.com/v0/b/BUCKET/o/PATH?...
-            if (urlObj.hostname === 'firebasestorage.googleapis.com') {
-              const pathParts = urlObj.pathname.split('/o/');
-              if (pathParts.length > 1) {
-                filePath = decodeURIComponent(pathParts[1].split('?')[0]);
-                useGcsUri = true;
-              }
+            const pathDecoded = decodeURIComponent(urlObj.pathname);
+            
+            // Extract actual bucket name from "/v0/b/BUCKET/o/PATH" if possible
+            const bMatch = pathDecoded.match(/\/v0\/b\/([^\/]+)/i);
+            if (bMatch) {
+              bucketFromUrl = bMatch[1];
             }
-            // Handle new format: https://BUCKET/v0/b/BUCKET/o/PATH or similar
-            else if (urlObj.hostname.includes('firebasestorage') || urlObj.hostname.includes(bucketName)) {
-              const pathParts = urlObj.pathname.split('/o/');
-              if (pathParts.length > 1) {
-                filePath = decodeURIComponent(pathParts[1].split('?')[0]);
-                useGcsUri = true;
-              }
+            
+            const pathParts = pathDecoded.split('/o/');
+            if (pathParts.length > 1) {
+              filePath = pathParts[1].split('?')[0];
+              useGcsUri = true;
             }
           } catch (e) {
             console.warn("Failed to parse file path from URL:", e);
@@ -702,7 +700,8 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
           // Build the audio source — prefer GCS URI, fallback to inline base64 content
           let audioSource;
           if (useGcsUri && filePath) {
-            const gcsUri = `gs://${bucketName}/${filePath}`;
+            const finalBucket = bucketFromUrl || bucketName;
+            const gcsUri = `gs://${finalBucket}/${filePath}`;
             console.log("Speech-to-Text using GCS URI:", gcsUri);
             audioSource = { uri: gcsUri };
           } else {
