@@ -22,6 +22,56 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
   const [status, setStatus] = useState('idle'); // idle, reading, uploading, analyzing, success, error
   const [progressMsg, setProgressMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [funnyMsg, setFunnyMsg] = useState('');
+
+  // Periodically change funny message during loading/processing states
+  useEffect(() => {
+    const funnyMessages = [
+      "Evaluando pedantería intelectual...",
+      "Buscando citas pretenciosas...",
+      "Midiendo nivel de esnobismo...",
+      "Contando las veces que se dijo 'narrativa'...",
+      "Analizando posturas existencialistas...",
+      "Detectando digresiones existenciales...",
+      "Traduciendo silencios incómodos...",
+      "Cuantificando referencias a autores rusos...",
+      "Filtrando debates sobre el olor a papel físico...",
+      "Descartando teorías conspirativas sobre el final...",
+      "Estimando nivel de desacuerdo educado...",
+      "Desinfectando spoilers no solicitados...",
+      "Calculando porcentaje de pedantería por minuto...",
+      "Traduciendo 'metaliteratura' a cristiano...",
+      "Buscando argumentos sin fundamento...",
+      "Analizando deltas de entusiasmo literario...",
+      "Mapeando opiniones sesgadas...",
+      "Comprobando si alguien realmente leyó la última página...",
+      "Sincronizando egos de los participantes..."
+    ];
+
+    let intervalId = null;
+    const isLoading = status === 'reading' || status === 'uploading' || status === 'analyzing';
+
+    if (isLoading) {
+      // Pick a random message to start
+      setFunnyMsg(funnyMessages[Math.floor(Math.random() * funnyMessages.length)]);
+      
+      intervalId = setInterval(() => {
+        setFunnyMsg(prev => {
+          let nextMsg;
+          do {
+            nextMsg = funnyMessages[Math.floor(Math.random() * funnyMessages.length)];
+          } while (nextMsg === prev);
+          return nextMsg;
+        });
+      }, 4000); // changes every 4 seconds
+    } else {
+      setFunnyMsg('');
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [status]);
   
   // Results
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -1704,9 +1754,28 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                 <div className="voice-processing-box">
                   <Loader2 className="voice-spinner" size={32} />
                   <p style={{ fontWeight: '600', fontSize: '1rem', marginTop: '1rem' }}>Procesando grabación</p>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center', maxWidth: '340px', marginTop: '0.25rem' }}>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center', maxWidth: '340px', marginTop: '0.25rem', marginBottom: '0.5rem' }}>
                     {progressMsg}
                   </p>
+                  {funnyMsg && (
+                    <div style={{
+                      fontSize: '0.8rem',
+                      color: 'var(--primary)',
+                      fontStyle: 'italic',
+                      marginTop: '0.75rem',
+                      fontWeight: '600',
+                      background: 'rgba(255, 42, 122, 0.06)',
+                      padding: '0.4rem 0.85rem',
+                      borderRadius: '12px',
+                      border: '1px dashed rgba(255, 42, 122, 0.25)',
+                      animation: 'fadeIn var(--transition-normal)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem'
+                    }}>
+                      <Sparkles size={13} style={{ flexShrink: 0 }} /> {funnyMsg}
+                    </div>
+                  )}
                 </div>
               ) : status === 'success' && analysisResult ? (
                 <div style={{ marginTop: '1.5rem' }}>
