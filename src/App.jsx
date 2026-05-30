@@ -12,7 +12,8 @@ import {
   BookOpen, 
   UserCheck,
   AlertCircle,
-  Volume2
+  Volume2,
+  TrendingUp
 } from 'lucide-react';
 
 import BookCard from './components/BookCard';
@@ -21,6 +22,7 @@ import AdminPanel from './components/AdminPanel';
 import LoginModal from './components/LoginModal';
 import FlamingoIcon from './components/FlamingoIcon';
 import VoiceAssistant from './components/VoiceAssistant';
+import ClubDashboard from './components/ClubDashboard';
 
 // High-quality mock books for Demo Mode
 const MOCK_BOOKS = [
@@ -34,7 +36,7 @@ const MOCK_BOOKS = [
     startDate: '2026-04-01',
     endDate: '2026-04-12',
     summary: 'Un asombroso misterio literario sobre un niño que descubre un libro olvidado en el Cementerio de los Libros Olvidados, lo que desencadena una oscura y peligrosa búsqueda en la Barcelona de la posguerra.',
-    review: 'Este libro es una carta de amor a la literatura. La prosa de Zafón es increíblemente atmosférica, convirtiendo a Barcelona en un país de las maravillas gótico lleno de sombras, lluvia y secretos. El personaje de Fermín Romero de Torres es uno de los compañeros más entrañables de toda la literatura, aportando ingenio y calidez a una historia que a menudo se adentra en profundidades trágicas. El misterio en sí está bellamente estructurado, manteniéndote en vilo mientras revela gradualmente las tragedias paralelas de dos autores. Una obra maestra que releeré por el resto de mi vida.',
+    review: 'Este libro es una carta de amor a la literatura. La prosa de Zafón es increíblemente atmosférica, convirtiendo a Barcelona en un país de las maravillas gótico lleno de sombras, lluvia y secretos. El personaje de Fermín Romero de Torres es uno de los compañeros más entrañables de toda la literatura, aportando ingenio y calidez a una historia que a menudo se adentra en profundidades trágicas. El misterio en sí está bellamente estructurado, manteniéndote en vilo mientras revela gradualmente las tragedies paralelas de dos autores. Una obra maestra que releeré por el resto de mi vida.',
     imageUrl: 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?auto=format&fit=crop&q=80&w=600',
     quotes: [
       { text: 'Los libros son espejos: solo se ve en ellos lo que uno ya lleva dentro.', page: 'Página 190', context: 'Daniel hablando con Julián Carax' },
@@ -44,6 +46,10 @@ const MOCK_BOOKS = [
       { title: 'Resumen de la saga El Cementerio de los Libros Olvidados', url: 'https://www.goodreads.com/series/62657-el-cementerio-de-los-libros-olvidados' }
     ],
     privateNotes: 'Es necesario escribir una sección que compare a Julián Carax con los autores reales de la posguerra. Revisar las entrevistas de Zafón sobre las influencias góticas de Barcelona.',
+    grades: {
+      start: { Jaime: 8, Almu: 7, Alejandro: 9, Joaquin: 6, Zepe: 8 },
+      end: { Jaime: 9, Almu: 8, Alejandro: 9, Joaquin: 8, Zepe: 9 }
+    },
     createdAt: '2026-04-12T20:00:00.000Z'
   },
   {
@@ -66,6 +72,10 @@ const MOCK_BOOKS = [
       { title: 'Boletín de hábitos de James Clear', url: 'https://jamesclear.com/3-2-1' }
     ],
     privateNotes: 'Revisar el bucle de retroalimentación de las señales de los hábitos. Quizás añadir un diagrama que represente el ciclo de Señal-Anhelo-Respuesta-Recompensa.',
+    grades: {
+      start: { Jaime: 6, Almu: 8, Alejandro: 7, Joaquin: 7, Zepe: 6 },
+      end: { Jaime: 7, Almu: 8, Alejandro: 8, Joaquin: 7, Zepe: 7 }
+    },
     createdAt: '2026-05-10T18:00:00.000Z'
   },
   {
@@ -87,6 +97,10 @@ const MOCK_BOOKS = [
       { title: 'Sitio web oficial de Andy Weir', url: 'https://www.andyweirauthor.com/' }
     ],
     privateNotes: 'Comprobar la fecha de estreno de la próxima adaptación cinematográfica. Preparar una publicación comparativa una vez que se estrene.',
+    grades: {
+      start: { Jaime: 7, Almu: 9, Alejandro: 6, Joaquin: 8, Zepe: 7 },
+      end: { Jaime: 8, Almu: 9, Alejandro: 7, Joaquin: 9, Zepe: 8 }
+    },
     createdAt: '2026-05-15T09:00:00.000Z'
   }
 ];
@@ -103,6 +117,7 @@ export default function App() {
   const [selectedBook, setSelectedBook] = useState(null);
   const [editingBook, setEditingBook] = useState(null);
   const [isGeneralVoiceOpen, setIsGeneralVoiceOpen] = useState(false);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
 
   // Filters and sorting states
   const [searchQuery, setSearchQuery] = useState('');
@@ -265,15 +280,19 @@ export default function App() {
     }
   };
 
-  const handleApplyNotesToBook = async (bookId, notesMarkdown) => {
+  const handleApplyNotesToBook = async (bookId, notesMarkdown, grades = null, generalSummary = null) => {
+    const updateData = { privateNotes: notesMarkdown };
+    if (grades) updateData.grades = grades;
+    if (generalSummary) updateData.summary = generalSummary;
+
     if (isDemoMode) {
-      setBooks((prev) => prev.map((b) => b.id === bookId ? { ...b, privateNotes: notesMarkdown } : b));
+      setBooks((prev) => prev.map((b) => b.id === bookId ? { ...b, ...updateData } : b));
     } else {
       const bookRef = doc(db, 'books', bookId);
-      await updateDoc(bookRef, { privateNotes: notesMarkdown });
+      await updateDoc(bookRef, updateData);
     }
     if (selectedBook && selectedBook.id === bookId) {
-      setSelectedBook(prev => ({ ...prev, privateNotes: notesMarkdown }));
+      setSelectedBook(prev => ({ ...prev, ...updateData }));
     }
   };
 
@@ -282,50 +301,57 @@ export default function App() {
       {/* Demo Mode Notice */}
       {isDemoMode && (
         <div style={{
-          background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.25) 0%, rgba(236, 72, 153, 0.25) 100%)',
-          borderBottom: '1px solid rgba(245, 158, 11, 0.3)',
+          background: 'linear-gradient(135deg, rgba(255, 42, 122, 0.1) 0%, rgba(255, 190, 59, 0.1) 100%)',
+          borderBottom: '1px solid rgba(255, 42, 122, 0.18)',
           padding: '0.75rem 1rem',
           textAlign: 'center',
           fontSize: '0.85rem',
-          color: '#fbbf24',
+          color: '#f4f4f7',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           gap: '0.5rem',
-          fontWeight: '500'
+          fontWeight: '500',
+          backdropFilter: 'blur(8px)',
+          position: 'relative',
+          zIndex: 101
         }}>
-          <AlertCircle size={16} />
-          <span>Estás viendo en <strong>Modo de Demostración</strong>. Configura Firebase en un archivo <code>.env</code> para sincronizar con GCP. Lee la <a href="file:///Users/dous/.gemini/antigravity/brain/437e6910-277f-4c84-8790-e40dcf39dbd6/gcp_setup_instructions.md" style={{ color: '#fff', textDecoration: 'underline' }}>Guía de Configuración</a>.</span>
+          <AlertCircle size={16} style={{ color: 'var(--primary)' }} />
+          <span>Estás en <strong>Modo Demo</strong>. Configura Firebase en <code>.env</code> para sincronizar en la nube. Lee la <a href="file:///Users/dous/.gemini/antigravity/brain/437e6910-277f-4c84-8790-e40dcf39dbd6/gcp_setup_instructions.md" style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: '600' }}>Guía de Configuración</a>.</span>
         </div>
       )}
 
       {/* Main Navbar */}
       <header className="header-wrapper">
         <div className="header-content">
-          <a href="#" className="logo">
-            <FlamingoIcon size={28} style={{ color: 'var(--primary)' }} />
-            <span>Reseñas <span style={{ fontWeight: '300' }}>Flamingo</span></span>
+          <a href="#" className="logo" style={{ transition: 'opacity 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.opacity = '0.8'} onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}>
+            <FlamingoIcon size={28} />
+            <span>Flamingo<span style={{ fontWeight: '300', opacity: 0.8 }}>Reviews</span></span>
           </a>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <button className="btn btn-secondary" onClick={() => setIsStatsOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <TrendingUp size={15} style={{ color: 'var(--primary)' }} /> Estadísticas
+            </button>
             {user ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <UserCheck size={14} className="star-filled" /> Administrador Activo
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.35rem 0.75rem', borderRadius: '20px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--sage)', display: 'inline-block', boxShadow: '0 0 8px var(--sage)' }}></span>
+                  Admin Activo
                 </span>
                 <button className="btn btn-secondary" onClick={() => setIsGeneralVoiceOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <Volume2 size={16} /> Añadir Sesión del Club
+                  <Volume2 size={15} /> Sesión de Club
                 </button>
                 <button className="btn btn-primary" onClick={startAdd}>
-                  <Plus size={16} /> Añadir Reseña
+                  <Plus size={15} /> Añadir Reseña
                 </button>
                 <button className="btn btn-secondary btn-icon" onClick={handleLogout} title="Cerrar Sesión">
-                  <LogOut size={16} />
+                  <LogOut size={15} />
                 </button>
               </div>
             ) : (
               <button className="btn btn-secondary" onClick={() => setIsLoginOpen(true)}>
-                <LogIn size={16} /> Iniciar Sesión de Admin
+                <LogIn size={15} /> Iniciar Sesión de Admin
               </button>
             )}
           </div>
@@ -334,26 +360,38 @@ export default function App() {
 
       {/* Hero Intro */}
       <section style={{
-        padding: '5rem 1.5rem 3rem 1.5rem',
-        textAlign: 'center'
+        padding: '6rem 1.5rem 4rem 1.5rem',
+        textAlign: 'center',
+        position: 'relative'
       }}>
-        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+        <div style={{ maxWidth: '700px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <h1 className="hero-title">
             Flamingo Library
           </h1>
+          <p style={{
+            fontFamily: 'var(--font-serif)',
+            fontSize: '1.25rem',
+            fontStyle: 'italic',
+            color: 'var(--text-muted)',
+            maxWidth: '560px',
+            margin: '0 auto',
+            lineHeight: '1.6'
+          }}>
+            Reseñas literarias del club, citas memorables, y transcripciones automatizadas con análisis inteligente de nuestras tertulias.
+          </p>
         </div>
       </section>
 
       {/* Main Shelves */}
-      <main className="container" style={{ paddingTop: '1rem' }}>
+      <main className="container" style={{ paddingTop: '0.5rem' }}>
         {/* Controls Card */}
-        <div className="glass-card controls-card">
+        <div className="controls-card">
           <div className="search-wrapper">
             <Search size={18} className="search-icon" />
             <input
               type="text"
               className="form-input search-input"
-              placeholder="Buscar por título, autor, términos clave..."
+              placeholder="Buscar por título, autor, género o contenido..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -361,11 +399,11 @@ export default function App() {
 
           <div className="filter-group">
             {/* Genre filter */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <Filter size={14} style={{ color: 'var(--text-muted)' }} />
               <select
                 className="form-select"
-                style={{ padding: '0.5rem 1.5rem 0.5rem 0.75rem', fontSize: '0.85rem' }}
+                style={{ fontSize: '0.85rem' }}
                 value={selectedGenre}
                 onChange={(e) => setSelectedGenre(e.target.value)}
               >
@@ -377,11 +415,11 @@ export default function App() {
             </div>
 
             {/* Status filter */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <BookOpen size={14} style={{ color: 'var(--text-muted)' }} />
               <select
                 className="form-select"
-                style={{ padding: '0.5rem 1.5rem 0.5rem 0.75rem', fontSize: '0.85rem' }}
+                style={{ fontSize: '0.85rem' }}
                 value={selectedStatus}
                 onChange={(e) => setSelectedStatus(e.target.value)}
               >
@@ -393,11 +431,11 @@ export default function App() {
             </div>
 
             {/* Sort options */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <SlidersHorizontal size={14} style={{ color: 'var(--text-muted)' }} />
               <select
                 className="form-select"
-                style={{ padding: '0.5rem 1.5rem 0.5rem 0.75rem', fontSize: '0.85rem' }}
+                style={{ fontSize: '0.85rem' }}
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
               >
@@ -414,7 +452,7 @@ export default function App() {
         {loading ? (
           <div className="loading-container">
             <div className="spinner" style={{ width: '2.5rem', height: '2.5rem' }} />
-            <p>Recogiendo libros de las estanterías...</p>
+            <p style={{ fontSize: '0.95rem', color: 'var(--text-muted)' }}>Cargando estanterías de libros...</p>
           </div>
         ) : filteredAndSortedBooks.length > 0 ? (
           <div className="books-grid">
@@ -432,13 +470,13 @@ export default function App() {
           <div style={{
             textAlign: 'center',
             padding: '5rem 2rem',
-            background: 'var(--card-bg)',
-            border: '1px dashed var(--border)',
-            borderRadius: 'var(--radius-lg)'
+            background: 'rgba(255, 255, 255, 0.01)',
+            border: '1px dashed rgba(255, 255, 255, 0.1)',
+            borderRadius: 'var(--radius-md)'
           }}>
-            <BookOpen size={48} style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', opacity: 0.5 }} />
-            <h3 className="serif-title" style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>No se encontraron reseñas</h3>
-            <p style={{ color: 'var(--text-muted)', maxWidth: '400px', margin: '0 auto' }}>
+            <BookOpen size={48} style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', opacity: 0.3 }} />
+            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', fontWeight: '700' }}>No se encontraron reseñas</h3>
+            <p style={{ color: 'var(--text-muted)', maxWidth: '400px', margin: '0 auto', fontSize: '0.9rem' }}>
               No pudimos encontrar ningún libro que coincida con tus criterios de búsqueda. Intenta ajustar el texto o los filtros.
             </p>
           </div>
@@ -449,8 +487,8 @@ export default function App() {
       <footer style={{
         marginTop: '6rem',
         padding: '3rem 1.5rem',
-        borderTop: '1px solid var(--border)',
-        background: 'rgba(4, 6, 13, 0.4)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+        background: 'rgba(7, 7, 9, 0.6)',
         textAlign: 'center',
         fontSize: '0.85rem',
         color: 'var(--text-muted)'
@@ -496,6 +534,13 @@ export default function App() {
           isDemoMode={isDemoMode}
           books={books}
           onApplyNotesToBook={handleApplyNotesToBook}
+        />
+      )}
+      {isStatsOpen && (
+        <ClubDashboard
+          isOpen={isStatsOpen}
+          onClose={() => setIsStatsOpen(false)}
+          books={books}
         />
       )}
     </div>

@@ -471,6 +471,7 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
       generalSummary: parsedResult.generalSummary || '',
       transcript: finalTranscript || '',
       attendees: parsedResult.speakers || [],
+      grades: parsedResult.grades || { start: {}, end: {} },
       result: parsedResult, // Keep result field for backward compatibility
       createdAt: new Date().toISOString()
     };
@@ -961,8 +962,19 @@ Devuelve únicamente el texto de la transcripción, sin ningún formato adiciona
           };
         });
 
+        // Generate mock grades for demo
+        const mockGrades = { start: {}, end: {} };
+        detectedSpeakers.forEach(sp => {
+          const name = speakerMapping[sp] || 'Invitado';
+          const startVal = Math.floor(Math.random() * 3) + 6; // 6, 7, 8
+          const endVal = startVal + Math.floor(Math.random() * 3); // startVal + 0, 1, 2
+          mockGrades.start[name] = startVal;
+          mockGrades.end[name] = Math.min(10, endVal);
+        });
+
         const parsedResult = {
           generalSummary: `Simulación de discusión grupal. Los participantes debatieron ampliamente sobre el libro del club de lectura, analizando sus temáticas clave, el desarrollo estilístico y compartiendo sus perspectivas individuales.`,
+          grades: mockGrades,
           speakers: mockSpeakers
         };
 
@@ -987,7 +999,8 @@ ${mappedTranscript}
 
 Instrucciones de análisis:
 1. Lee detenidamente la transcripción y extrae los temas clave discutidos, los acuerdos y desacuerdos principales.
-2. Para cada miembro del club de lectura que participó en la sesión (los nombres indicados en la transcripción, tales como Jaime, Almu, Alejandro, Joaquin, Zepe):
+2. Identifica y extrae las calificaciones individuales (de 1 a 10) que cada miembro dio al inicio de la sesión (expectativas o valoración inicial) y al final de la sesión (valoración tras debatir). Busca frases como "Le doy un 7 al empezar", "Le pongo un 8 al final", "Mi nota inicial es 6", "Termino poniéndole un 8", etc. Si un miembro no da explícitamente una nota, intenta deducirla a partir de su nivel de entusiasmo en la transcripción, o devuélvela como null si no hay información alguna.
+3. Para cada miembro del club de lectura que participó en la sesión (los nombres indicados en la transcripción, tales como Jaime, Almu, Alejandro, Joaquin, Zepe):
    - Genera un resumen de 2 o 3 frases de sus opiniones y contribuciones principales, redactado estrictamente en primera persona singular (ej. "Yo opiné que...", "Pienso que...").
    - Genera un documento en Markdown detallado y extenso (mínimo 250-400 palabras) que sirva como sus Notas Preliminares Privadas personales. Debe capturar toda su perspectiva como hablante, pensamientos íntimos, aportaciones clave de debate y argumentos. Organizado estrictamente con el siguiente esquema:
      # Notas preliminares de [Nombre]
@@ -997,11 +1010,21 @@ Instrucciones de análisis:
      - Registrar qué puntos de vista defendieron otros hablantes y en qué estuve de acuerdo o en desacuerdo, detallando la discusión.
      ## Ideas y Estructura para mi Reseña Final
      - Mis conclusiones principales y cómo planeo estructurar mis argumentos para la reseña final.
-3. Si hay algún "Invitado", genera lo mismo para él.
+4. Si hay algún "Invitado", genera lo mismo para él.
 
 Debes devolver tu respuesta estrictamente en formato JSON con la siguiente estructura exacta:
 {
   "generalSummary": "Un resumen general de la sesión, los temas discutidos, conclusiones y dinámica del grupo.",
+  "grades": {
+    "start": {
+      "Nombre del Miembro": 8,
+      ...
+    },
+    "end": {
+      "Nombre del Miembro": 9,
+      ...
+    }
+  },
   "speakers": [
     {
       "id": "Nombre del Miembro" (ej. "Jaime", "Almu", etc.),
@@ -1526,7 +1549,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                     padding: '1rem',
                     border: '1px dashed var(--primary)',
                     borderRadius: 'var(--radius-md)',
-                    background: 'rgba(89, 178, 146, 0.04)',
+                    background: 'rgba(255, 42, 122, 0.04)',
                     textAlign: 'center',
                     display: 'flex',
                     flexDirection: 'column',
@@ -1685,10 +1708,10 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                   {/* General Summary */}
                   {(analysisResult.generalSummary || analysisResult.result?.generalSummary) && (
                     <div style={{
-                      background: 'rgba(89, 178, 146, 0.05)',
+                      background: 'rgba(255, 42, 122, 0.04)',
                       padding: '1.25rem',
                       borderRadius: 'var(--radius-md)',
-                      border: '1px solid rgba(89, 178, 146, 0.2)',
+                      border: '1px solid rgba(255, 42, 122, 0.15)',
                       marginBottom: '1.5rem',
                       textAlign: 'left'
                     }}>
@@ -1875,9 +1898,11 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                           style={{ padding: '0.5rem 1.25rem', height: 'auto', fontSize: '0.85rem' }}
                           onClick={async () => {
                             const markdown = speakersList.find(s => s.id === selectedSpeakerId)?.notesMarkdown;
+                            const grades = analysisResult.grades || analysisResult.result?.grades || null;
+                            const genSummary = analysisResult.generalSummary || analysisResult.result?.generalSummary || null;
                             if (markdown && targetBookId && onApplyNotesToBook) {
                               try {
-                                await onApplyNotesToBook(targetBookId, markdown);
+                                await onApplyNotesToBook(targetBookId, markdown, grades, genSummary);
                                 alert("Notas de voz aplicadas con éxito al libro.");
                                 onClose();
                               } catch (err) {

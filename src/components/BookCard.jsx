@@ -81,7 +81,7 @@ export default function BookCard({ book, onClick, onEdit, isAdmin }) {
                 key={star}
                 size={14}
                 fill={star <= rating ? 'var(--primary)' : 'none'}
-                color={star <= rating ? 'var(--primary)' : 'var(--text-muted)'}
+                color={star <= rating ? 'var(--primary)' : 'rgba(255, 255, 255, 0.15)'}
                 className={star <= rating ? 'star-filled' : ''}
               />
             ))}

@@ -104,7 +104,7 @@ export default function LoginModal({ isOpen, onClose }) {
               style={{ width: '100%' }}
             >
               {loading ? (
-                <div className="spinner" style={{ width: '1.2rem', height: '1.2rem', borderTopColor: '#000' }} />
+                <div className="spinner" style={{ width: '1.2rem', height: '1.2rem', borderTopColor: '#fff' }} />
               ) : (
                 'Iniciar sesión con Google'
               )}
@@ -158,7 +158,7 @@ export default function LoginModal({ isOpen, onClose }) {
               style={{ width: '100%' }}
             >
               {loading ? (
-                <div className="spinner" style={{ width: '1.2rem', height: '1.2rem', borderTopColor: '#000' }} />
+                <div className="spinner" style={{ width: '1.2rem', height: '1.2rem', borderTopColor: '#fff' }} />
               ) : (
                 'Iniciar sesión'
               )}

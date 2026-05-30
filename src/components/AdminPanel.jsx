@@ -48,6 +48,40 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
   const [selectedDraftId, setSelectedDraftId] = useState('');
   const [selectedAttendeeName, setSelectedAttendeeName] = useState('');
 
+  // Member grades states
+  const [grades, setGrades] = useState({ start: {}, end: {} });
+  const [members, setMembers] = useState([]);
+
+  useEffect(() => {
+    const fetchMembers = async () => {
+      try {
+        let list = [];
+        if (!isDemoMode) {
+          const querySnapshot = await getDocs(collection(db, 'speakers_registry'));
+          list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        } else {
+          list = JSON.parse(localStorage.getItem('flamingo_speakers_registry') || '[]');
+        }
+        
+        if (list.length === 0) {
+          list = [
+            { id: 'miembro_1', name: 'Jaime' },
+            { id: 'miembro_2', name: 'Almu' },
+            { id: 'miembro_3', name: 'Alejandro' },
+            { id: 'miembro_4', name: 'Joaquin' },
+            { id: 'miembro_5', name: 'Zepe' }
+          ];
+        }
+        setMembers(list);
+      } catch (e) {
+        console.error("Error fetching members:", e);
+      }
+    };
+    if (isOpen) {
+      fetchMembers();
+    }
+  }, [isOpen, isDemoMode]);
+
   const fetchSessionDrafts = async () => {
     setLoadingDrafts(true);
     try {
@@ -100,8 +134,12 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
           setGenre(matchingBook.genre || '');
         }
       }
+
+      if (session.grades) {
+        setGrades(session.grades);
+      }
       
-      alert(`Borrador de sesión cargado con éxito para ${selectedAttendeeName}. Las notas privadas y el resumen han sido actualizados.`);
+      alert(`Borrador de sesión cargado con éxito para ${selectedAttendeeName}. Las notas privadas, resumen y calificaciones han sido actualizados.`);
       setShowDraftSelector(false);
       setSelectedDraftId('');
       setSelectedAttendeeName('');
@@ -127,6 +165,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
       setImagePreview(editBook.imageUrl || '');
       setQuotes(editBook.quotes && editBook.quotes.length > 0 ? editBook.quotes : [{ text: '', page: '', context: '' }]);
       setReferences(editBook.references && editBook.references.length > 0 ? editBook.references : [{ title: '', url: '' }]);
+      setGrades(editBook.grades || { start: {}, end: {} });
     } else {
       // Reset form
       setTitle('');
@@ -145,9 +184,16 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
       setUploadProgress(-1);
       setQuotes([{ text: '', page: '', context: '' }]);
       setReferences([{ title: '', url: '' }]);
+      
+      const initialGrades = { start: {}, end: {} };
+      members.forEach(m => {
+        initialGrades.start[m.name] = '';
+        initialGrades.end[m.name] = '';
+      });
+      setGrades(initialGrades);
     }
     setError('');
-  }, [editBook, isOpen]);
+  }, [editBook, isOpen, members]);
 
   if (!isOpen) return null;
 
@@ -297,6 +343,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
         imageUrl: finalImageUrl,
         quotes: cleanedQuotes,
         references: cleanedReferences,
+        grades,
         updatedAt: new Date().toISOString()
       };
 
@@ -393,8 +440,8 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
           <form onSubmit={handleSubmit} id="admin-book-form">
             {/* Session Draft Loading Section */}
             <div style={{
-              background: 'rgba(89, 178, 146, 0.05)',
-              border: '1px solid rgba(89, 178, 146, 0.2)',
+              background: 'rgba(255, 42, 122, 0.04)',
+              border: '1px solid rgba(255, 42, 122, 0.15)',
               borderRadius: 'var(--radius-md)',
               padding: '1.25rem',
               marginBottom: '1.5rem',
@@ -728,6 +775,66 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
               />
             </div>
 
+            {/* Session Grades Section */}
+            <div style={{ margin: '2.5rem 0 2rem 0', borderTop: '1px solid var(--border)', paddingTop: '1.5rem' }}>
+              <h3 className="serif-title" style={{ fontSize: '1.25rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Star size={18} className="star-filled" /> Calificaciones de los Miembros (1-10)
+              </h3>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
+                Registra las calificaciones individuales dadas por los miembros al inicio y al final de la sesión de debate.
+              </p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: '1rem', fontWeight: 'bold', fontSize: '0.85rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)' }}>
+                  <span>Miembro</span>
+                  <span>Nota Inicial</span>
+                  <span>Nota Final</span>
+                </div>
+                {members.map(member => {
+                  const mName = member.name;
+                  return (
+                    <div key={member.id || mName} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: '1rem', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.9rem', fontWeight: '500' }}>{mName}</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        step="0.5"
+                        placeholder="N/D"
+                        className="form-input"
+                        style={{ padding: '0.35rem 0.5rem', fontSize: '0.85rem' }}
+                        value={grades.start?.[mName] !== undefined ? grades.start[mName] : ''}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? '' : Number(e.target.value);
+                          setGrades(prev => ({
+                            ...prev,
+                            start: { ...prev.start, [mName]: val }
+                          }));
+                        }}
+                      />
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        step="0.5"
+                        placeholder="N/D"
+                        className="form-input"
+                        style={{ padding: '0.35rem 0.5rem', fontSize: '0.85rem' }}
+                        value={grades.end?.[mName] !== undefined ? grades.end[mName] : ''}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? '' : Number(e.target.value);
+                          setGrades(prev => ({
+                            ...prev,
+                            end: { ...prev.end, [mName]: val }
+                          }));
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Dynamic Quotes Section */}
             <div style={{ margin: '2rem 0', borderTop: '1px solid var(--border)', paddingTop: '1.5rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -880,7 +987,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
             style={{ minWidth: '120px' }}
           >
             {saving ? (
-              <div className="spinner" style={{ width: '1.2rem', height: '1.2rem', borderTopColor: '#000' }} />
+              <div className="spinner" style={{ width: '1.2rem', height: '1.2rem', borderTopColor: '#fff' }} />
             ) : (
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Save size={16} /> Guardar reseña
