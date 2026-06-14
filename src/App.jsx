@@ -63,6 +63,18 @@ export default function App() {
     }
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
+        // If they logged in with Google but do not have the GCP access token in localStorage,
+        // it means they logged in before the update. We force sign out to refresh their scopes.
+        const isGoogleUser = currentUser.providerData.some(p => p.providerId === 'google.com');
+        const hasGcpToken = !!localStorage.getItem('flamingo_gcp_access_token');
+        
+        if (isGoogleUser && !hasGcpToken) {
+          console.warn("Google user detected without GCP access token. Force signing out to refresh scopes.");
+          signOut(auth).catch(err => console.error(err));
+          setUser(null);
+          return;
+        }
+
         // Double check admin email restrictions
         const emailLower = currentUser.email ? currentUser.email.toLowerCase() : '';
         const isAuthorized = authorizedEmails.includes(emailLower);
@@ -93,7 +105,14 @@ export default function App() {
     const booksRef = collection(db, 'books');
     const q = query(booksRef, orderBy('createdAt', 'desc'));
 
+    // Set a safety timeout to prevent infinite loading screens
+    const safetyTimeout = setTimeout(() => {
+      console.warn("Firestore onSnapshot timed out. Setting loading to false as a safety measure.");
+      setLoading(false);
+    }, 4000);
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      clearTimeout(safetyTimeout);
       const booksData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -101,6 +120,7 @@ export default function App() {
       setBooks(booksData);
       setLoading(false);
     }, (error) => {
+      clearTimeout(safetyTimeout);
       console.error("Firestore loading error, falling back to Demo Mode:", error);
       setIsDemoMode(true);
       setBooks(MOCK_BOOKS);
@@ -114,6 +134,7 @@ export default function App() {
   const handleLogout = async () => {
     if (!auth) return;
     try {
+      localStorage.removeItem('flamingo_gcp_access_token');
       await signOut(auth);
     } catch (err) {
       console.error("Log out failed:", err);
