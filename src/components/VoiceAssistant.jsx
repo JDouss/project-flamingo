@@ -841,104 +841,34 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
             throw new Error("GCP STT se completó pero no devolvió ninguna palabra.");
           }
         } catch (sttError) {
-          console.warn("GCP Speech-to-Text failed, falling back to Gemini 3.5 Flash transcription:", sttError);
-          useGcpSst = false;
+          console.error("GCP Speech-to-Text failed:", sttError);
+          let customMsg = sttError.message || "Error al procesar la transcripción con GCP Speech-to-Text.";
+          if (customMsg.includes('storage.objects.get') || customMsg.includes('Anonymous caller') || customMsg.includes('denied')) {
+            throw new Error(
+              `Error de permisos en Google Cloud Storage: El servicio Speech-to-Text no tiene acceso para leer el archivo de audio de tu bucket privado.\n\n` +
+              `Para solucionarlo, debes otorgar el rol de "Lector de objetos de Storage" (Storage Object Viewer) a la cuenta de servicio de Speech-to-Text:\n\n` +
+              `1. Identifica el proyecto de GCP de tu clave API (VITE_GCP_API_KEY).\n` +
+              `   - Si es el proyecto de Firebase (project-flamingo-497112), la cuenta de servicio es:\n` +
+              `     service-158969769057@gcp-sa-speech.iam.gserviceaccount.com\n` +
+              `   - Si creaste la clave API en otro proyecto de GCP, la cuenta de servicio será:\n` +
+              `     service-[NÚMERO_DE_ESE_PROYECTO]@gcp-sa-speech.iam.gserviceaccount.com\n\n` +
+              `2. Ve a la consola de IAM en Google Cloud:\n` +
+              `   https://console.cloud.google.com/iam-admin/iam?project=project-flamingo-497112\n\n` +
+              `3. Haz clic en "Otorgar acceso" (Grant Access) arriba.\n\n` +
+              `4. En "Nuevos miembros" (New principals), pega la cuenta de servicio correspondiente.\n\n` +
+              `5. En "Rol" (Role), busca y selecciona: Cloud Storage -> Lector de objetos de Storage (Storage Object Viewer).\n\n` +
+              `6. Haz clic en "Guardar" e intenta de nuevo subir la sesión.`
+            );
+          }
+          throw sttError;
         }
-      }
-
-      if (!useGcpSst) {
-        setProgressMsg('Generando transcripción con Gemini 3.5 Flash...');
-        
-        let audioPart;
-        let uploadedGeminiFile = null;
-        
-        try {
-          // If file is larger than 15MB, upload it via Files API. Otherwise, send inline base64
-          const isLargeFile = audioFile.size > 15 * 1024 * 1024;
-          
-          if (isLargeFile) {
-            setProgressMsg('Subiendo audio a Gemini Files API (archivo grande)...');
-            uploadedGeminiFile = await uploadToGeminiFilesAPI(audioFile, apiKey);
-            
-            // Poll status until it is ACTIVE
-            setProgressMsg('Procesando audio en servidores de Gemini...');
-            await pollGeminiFileActive(uploadedGeminiFile, apiKey);
-            
-            audioPart = {
-              fileData: {
-                mimeType: uploadedGeminiFile.mimeType,
-                fileUri: uploadedGeminiFile.uri
-              }
-            };
-          } else {
-            setProgressMsg('Codificando audio para envío a Gemini...');
-            const base64Data = await fileToBase64(audioFile);
-            audioPart = {
-              inlineData: {
-                mimeType: getGeminiMimeType(audioFile),
-                data: base64Data
-              }
-            };
-          }
-
-          const expectedSpeakersText = expectedSpeakers === 'auto' 
-            ? 'un número indeterminado de' 
-            : expectedSpeakers === '6' 
-              ? '6 o más' 
-              : expectedSpeakers;
-
-          const transcribePrompt = `
-Eres un transcriptor experto. Transcribe el siguiente archivo de audio de una reunión de club de lectura en español.
-Realiza la diarización acústica para separar las intervenciones de los diferentes hablantes. En esta grabación participan exactamente ${expectedSpeakersText} miembros/voces.
-Escribe la transcripción completa de forma cronológica, etiquetando a cada hablante de forma secuencial como "[Speaker 1]", "[Speaker 2]", "[Speaker 3]", etc., según vayan apareciendo en el audio.
-No intentes adivinar sus nombres reales. Limítate a transcribir exactamente lo que dicen y a separarlos por etiquetas de altavoz "[Speaker X]".
-Devuelve únicamente el texto de la transcripción, sin ningún formato adicional.
-`;
-
-          setProgressMsg('Transcribiendo audio con Gemini 3.5 Flash...');
-          const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey.trim()}`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                contents: [
-                  {
-                    parts: [audioPart, { text: transcribePrompt }]
-                  }
-                ]
-              })
-            }
-          );
-
-          if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            throw new Error(errData?.error?.message || `Error de Gemini (${response.status})`);
-          }
-
-          const data = await response.json();
-          gcpDiarizedTranscript = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-          if (!gcpDiarizedTranscript.trim()) {
-            throw new Error("Gemini devolvió una transcripción vacía.");
-          }
-          console.log("Gemini Diarized Transcript success:", gcpDiarizedTranscript);
-          
-          // Try to delete the file after transcription to be clean (optional, don't fail if delete fails)
-          if (uploadedGeminiFile) {
-            try {
-              fetch(`https://generativelanguage.googleapis.com/v1beta/${uploadedGeminiFile.name}?key=${apiKey.trim()}`, {
-                method: 'DELETE'
-              }).catch(() => {});
-            } catch (delErr) {
-              // ignore
-            }
-          }
-        } catch (geminiError) {
-          console.error("Gemini fallback transcription failed:", geminiError);
-          throw new Error(`Error en transcripción: ${geminiError.message}`);
-        }
+      } else {
+        // En modo demo, simulamos una transcripción básica de manera instantánea
+        console.log("Running in Demo Mode: generating mock diarized transcript");
+        gcpDiarizedTranscript = `[Speaker 1]: Hola a todos, hoy vamos a comentar el libro del mes. ¿Qué os ha parecido?
+[Speaker 2]: A mí me ha encantado la ambientación de la posguerra, me parece muy lograda.
+[Speaker 3]: Pues yo creo que el ritmo decae un poco en la segunda mitad, aunque el final es muy potente.`;
+        useGcpSst = true;
       }
 
       // 2. Parse speaker tags and create snippets
