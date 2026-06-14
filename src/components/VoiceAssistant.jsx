@@ -734,13 +734,25 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
           console.log("STT Request config:", JSON.stringify(sttConfig, null, 2));
 
           // Call Speech-to-Text API longrunningrecognize
+          const gcpAccessToken = localStorage.getItem('flamingo_gcp_access_token');
+          const sttHeaders = {
+            'Content-Type': 'application/json',
+          };
+          let sttUrl = 'https://speech.googleapis.com/v1/speech:longrunningrecognize';
+
+          if (gcpAccessToken) {
+            sttHeaders['Authorization'] = `Bearer ${gcpAccessToken}`;
+            console.log("Using Google OAuth2 access token for Speech-to-Text authorization");
+          } else {
+            sttUrl += `?key=${gcpApiKey.trim()}`;
+            console.log("No OAuth token found. Falling back to GCP API key");
+          }
+
           const sttRes = await fetch(
-            `https://speech.googleapis.com/v1/speech:longrunningrecognize?key=${gcpApiKey.trim()}`,
+            sttUrl,
             {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
+              headers: sttHeaders,
               body: JSON.stringify({
                 config: sttConfig,
                 audio: audioSource
@@ -769,7 +781,14 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
             attempts++;
             setProgressMsg(`Transcribiendo en GCP STT... (${attempts * pollInterval / 1000}s)`);
 
-            const opRes = await fetch(`https://speech.googleapis.com/v1/${operationName}?key=${gcpApiKey.trim()}`);
+            let opUrl = `https://speech.googleapis.com/v1/${operationName}`;
+            const opHeaders = {};
+            if (gcpAccessToken) {
+              opHeaders['Authorization'] = `Bearer ${gcpAccessToken}`;
+            } else {
+              opUrl += `?key=${gcpApiKey.trim()}`;
+            }
+            const opRes = await fetch(opUrl, { headers: opHeaders });
             if (!opRes.ok) {
               throw new Error(`Error al verificar operación STT (${opRes.status})`);
             }

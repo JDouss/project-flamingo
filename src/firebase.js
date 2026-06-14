@@ -33,6 +33,7 @@ if (hasConfig) {
     storage = getStorage(app);
     auth = getAuth(app);
     googleProvider = new GoogleAuthProvider();
+    googleProvider.addScope('https://www.googleapis.com/auth/cloud-platform');
   } catch (error) {
     console.error("Error initializing Firebase:", error);
   }
