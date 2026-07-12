@@ -105,13 +105,13 @@ function parseInline(text) {
         return <em key={idx}>{part.content}</em>;
       case 'code':
         return (
-          <code key={idx} style={{ 
-            background: 'rgba(255, 255, 255, 0.08)', 
-            padding: '0.1rem 0.35rem', 
-            borderRadius: 'var(--radius-sm, 4px)', 
+          <code key={idx} style={{
+            background: 'rgba(42, 26, 46, 0.06)',
+            padding: '0.1rem 0.35rem',
+            borderRadius: 'var(--radius-sm, 4px)',
             fontFamily: 'monospace',
             fontSize: '0.85em',
-            color: 'var(--primary)'
+            color: 'var(--primary-ink)'
           }}>
             {part.content}
           </code>

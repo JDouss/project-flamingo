@@ -77,12 +77,12 @@ export default function LoginModal({ isOpen, onClose }) {
 
         {error && (
           <div style={{
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
+            background: 'var(--danger-bg)',
+            border: '1px solid var(--danger-border)',
             borderRadius: 'var(--radius-sm)',
             padding: '0.75rem 1rem',
             fontSize: '0.85rem',
-            color: '#f87171',
+            color: 'var(--danger)',
             display: 'flex',
             alignItems: 'center',
             gap: '0.5rem'

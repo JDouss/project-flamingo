@@ -135,7 +135,7 @@ export default function App() {
             </button>
             {user ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.35rem 0.75rem', borderRadius: '20px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(42, 26, 46, 0.04)', padding: '0.35rem 0.75rem', borderRadius: '20px', border: '1px solid var(--border)' }}>
                   <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--sage)', display: 'inline-block', boxShadow: '0 0 8px var(--sage)' }}></span>
                   Admin Activo
                 </span>
@@ -243,8 +243,8 @@ export default function App() {
           <div style={{
             textAlign: 'center',
             padding: '5rem 2rem',
-            background: 'rgba(255, 255, 255, 0.01)',
-            border: '1px dashed rgba(255, 255, 255, 0.1)',
+            background: '#ffffff',
+            border: '1px dashed rgba(42, 26, 46, 0.14)',
             borderRadius: 'var(--radius-md)'
           }}>
             <BookOpen size={48} style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', opacity: 0.3 }} />
@@ -260,8 +260,8 @@ export default function App() {
       <footer style={{
         marginTop: '6rem',
         padding: '3rem 1.5rem',
-        borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-        background: 'rgba(7, 7, 9, 0.6)',
+        borderTop: '1px solid var(--border)',
+        background: 'var(--bg-secondary)',
         textAlign: 'center',
         fontSize: '0.85rem',
         color: 'var(--text-muted)'

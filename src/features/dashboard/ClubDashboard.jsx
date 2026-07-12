@@ -266,7 +266,7 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                       const y = 180 - (val * 15);
                       return (
                         <g key={val}>
-                          <line x1="45" y1={y} x2="620" y2={y} stroke="rgba(255,255,255,0.05)" />
+                          <line x1="45" y1={y} x2="620" y2={y} stroke="rgba(42,26,46,0.08)" />
                           <text x="35" y={y + 4} fill="var(--text-muted)" fontSize="9" textAnchor="end">{val}</text>
                         </g>
                       );
@@ -326,7 +326,7 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                           {points.map((p, idx) => (
                             <g key={idx}>
                               {/* vertical indicator */}
-                              <line x1={p.x} y1="180" x2={p.x} y2={Math.min(p.startY, p.endY) - 5} stroke="rgba(255,255,255,0.03)" />
+                              <line x1={p.x} y1="180" x2={p.x} y2={Math.min(p.startY, p.endY) - 5} stroke="rgba(42,26,46,0.06)" />
                               
                               {/* Start point circle */}
                               <circle cx={p.x} cy={p.startY} r="3.5" fill="var(--accent-gold)" stroke="var(--bg-card)" strokeWidth="1" />
@@ -376,7 +376,7 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                         const y = 170 - (val * 14);
                         return (
                           <g key={val}>
-                            <line x1="40" y1={y} x2="330" y2={y} stroke="rgba(255,255,255,0.05)" />
+                            <line x1="40" y1={y} x2="330" y2={y} stroke="rgba(42,26,46,0.08)" />
                             <text x="30" y={y + 4} fill="var(--text-muted)" fontSize="9" textAnchor="end">{val}</text>
                           </g>
                         );
@@ -439,7 +439,7 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                       .map(m => {
                         const isPositive = m.delta >= 0;
                         return (
-                          <div key={m.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                          <div key={m.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)' }}>
                             <div style={{ display: 'flex', flexDirection: 'column' }}>
                               <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{m.name}</span>
                               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Participó en {m.count} debates</span>
@@ -478,7 +478,7 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                     </thead>
                     <tbody>
                       {sortedTableBooks.map(b => (
-                        <tr key={b.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                        <tr key={b.id} style={{ borderBottom: '1px solid var(--border)' }}>
                           <td style={{ padding: '0.75rem 0.5rem', fontWeight: 'bold' }}>{b.title}</td>
                           <td style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>{b.author}</td>
                           <td style={{ padding: '0.75rem 0.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>

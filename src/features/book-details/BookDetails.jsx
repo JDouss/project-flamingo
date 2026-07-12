@@ -96,8 +96,8 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
                   <Star
                     key={star}
                     size={20}
-                    fill={star <= rating ? 'var(--primary)' : 'none'}
-                    color={star <= rating ? 'var(--primary)' : 'rgba(255, 255, 255, 0.15)'}
+                    fill={star <= rating ? 'var(--accent-gold)' : 'none'}
+                    color={star <= rating ? 'var(--accent-gold)' : 'rgba(42, 26, 46, 0.15)'}
                     className={star <= rating ? 'star-filled' : ''}
                   />
                 ))}
@@ -143,7 +143,7 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
           {summary && (
             <div>
               <h3 className="section-title">Sinopsis</h3>
-              <p style={{ fontStyle: 'italic', color: 'var(--text-muted)', fontSize: '1.05rem', borderLeft: '3px solid rgba(255,255,255,0.1)', paddingLeft: '1rem', lineHeight: '1.7' }}>
+              <p style={{ fontStyle: 'italic', color: 'var(--text-muted)', fontSize: '1.05rem', borderLeft: '3px solid var(--border)', paddingLeft: '1rem', lineHeight: '1.7' }}>
                 "{summary}"
               </p>
             </div>
@@ -175,7 +175,7 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
             const delta = (startAvg && endAvg) ? (endAvg - startAvg).toFixed(1) : null;
 
             return (
-              <div style={{ margin: '2.5rem 0', padding: '1.5rem', background: 'rgba(255,255,255,0.02)', border: '1px dashed var(--primary)', borderRadius: 'var(--radius-lg)' }}>
+              <div style={{ margin: '2.5rem 0', padding: '1.5rem', background: 'var(--bg-secondary)', border: '1px dashed var(--primary)', borderRadius: 'var(--radius-lg)' }}>
                 <h3 className="section-title" style={{ marginTop: 0, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--primary)' }}>
                   <Star size={20} className="star-filled" fill="var(--primary)" /> Calificaciones del Debate (1-10)
                 </h3>
@@ -220,7 +220,7 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
                       const y = 170 - (val * 14);
                       return (
                         <g key={val}>
-                          <line x1="45" y1={y} x2="480" y2={y} stroke="rgba(255,255,255,0.06)" strokeDasharray="3,3" />
+                          <line x1="45" y1={y} x2="480" y2={y} stroke="rgba(42,26,46,0.10)" strokeDasharray="3,3" />
                           <text x="35" y={y + 4} fill="var(--text-muted)" fontSize="9" textAnchor="end">{val}</text>
                         </g>
                       );
@@ -312,7 +312,7 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
                         const eVal = parseGrade(endGrades[m]);
                         const diff = (sVal !== null && eVal !== null) ? (eVal - sVal).toFixed(1) : null;
                         return (
-                          <tr key={m} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                          <tr key={m} style={{ borderBottom: '1px solid var(--border)' }}>
                             <td style={{ padding: '0.5rem', fontWeight: 'bold' }}>{m}</td>
                             <td style={{ padding: '0.5rem', textAlign: 'center', color: 'var(--accent-gold)' }}>{sVal !== null ? sVal : '—'}</td>
                             <td style={{ padding: '0.5rem', textAlign: 'center', color: 'var(--sage)' }}>{eVal !== null ? eVal : '—'}</td>

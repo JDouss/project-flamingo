@@ -52,13 +52,13 @@ export default function FlamingoIcon({ size = 32, className = '', ...props }) {
       />
       
       {/* Standing Leg */}
-      <line x1="26" y1="48" x2="26" y2="57" stroke="#00f0ff" strokeWidth="3" />
-      
+      <line x1="26" y1="48" x2="26" y2="57" stroke="#2a1a2e" strokeWidth="3" />
+
       {/* Bent Leg (Forming a number 4 shape) */}
-      <path 
-        d="M31 48 L31 52.5 L26 52.5" 
-        stroke="#00f0ff"
-        strokeWidth="2.5" 
+      <path
+        d="M31 48 L31 52.5 L26 52.5"
+        stroke="#2a1a2e"
+        strokeWidth="2.5"
       />
     </svg>
   );

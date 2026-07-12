@@ -359,12 +359,12 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
         <div className="admin-body">
           {error && (
             <div style={{
-              background: 'rgba(239, 68, 68, 0.15)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
+              background: 'var(--danger-bg)',
+              border: '1px solid var(--danger-border)',
               borderRadius: 'var(--radius-sm)',
               padding: '0.75rem 1rem',
               marginBottom: '1.5rem',
-              color: '#f87171',
+              color: 'var(--danger)',
               fontSize: '0.875rem'
             }}>
               {error}
@@ -540,8 +540,8 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
                     >
                       <Star
                         size={24}
-                        fill={star <= rating ? 'var(--primary)' : 'none'}
-                        color={star <= rating ? 'var(--primary)' : 'var(--text-muted)'}
+                        fill={star <= rating ? 'var(--accent-gold)' : 'none'}
+                        color={star <= rating ? 'var(--accent-gold)' : 'var(--text-muted)'}
                         className={star <= rating ? 'star-filled' : ''}
                       />
                     </button>
@@ -658,7 +658,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
                     <span>Subiendo imagen de portada...</span>
                     <span>{uploadProgress}%</span>
                   </div>
-                  <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
+                  <div style={{ width: '100%', height: '4px', background: 'rgba(42,26,46,0.08)', borderRadius: '2px', overflow: 'hidden' }}>
                     <div style={{ width: `${uploadProgress}%`, height: '100%', background: 'var(--primary)', transition: 'width 0.1s' }} />
                   </div>
                 </div>
@@ -802,7 +802,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
                 <div
                   key={index}
                   style={{
-                    background: 'rgba(0,0,0,0.15)',
+                    background: 'var(--bg-secondary)',
                     padding: '1rem',
                     borderRadius: 'var(--radius-sm)',
                     border: '1px solid var(--border)',
@@ -813,7 +813,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
                   <button
                     type="button"
                     onClick={() => removeQuote(index)}
-                    style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}
+                    style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', background: 'none', border: 'none', color: 'var(--accent-coral)', cursor: 'pointer' }}
                     title="Eliminar cita"
                   >
                     <Trash2 size={16} />
@@ -895,7 +895,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
                   <button
                     type="button"
                     onClick={() => removeReference(index)}
-                    style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: '0.25rem' }}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent-coral)', cursor: 'pointer', padding: '0.25rem' }}
                     title="Eliminar referencia"
                   >
                     <Trash2 size={16} />
