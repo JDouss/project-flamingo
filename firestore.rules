@@ -1,0 +1,41 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Admins are identified by email on their Firebase Auth token.
+    // Keep this list in sync with VITE_AUTHORIZED_EMAILS.
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() in [
+          'doussinague95@gmail.com'
+        ];
+    }
+
+    // Book reviews: public catalog, admin-only writes.
+    match /books/{bookId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Club sessions (audio, analysis, grades). Public read so BookDetails
+    // can embed the session player without auth. Clients may only create
+    // the initial placeholder and edit drafts; the Cloud Function writes
+    // with the Admin SDK and bypasses these rules.
+    match /transcriptions/{sessionId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Club member registry (name + persona hints for the AI).
+    match /speakers_registry/{memberId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Deny everything else.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

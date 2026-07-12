@@ -1,44 +1,37 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { db, auth, adminEmail, authorizedEmails } from './firebase';
+import { useState, useEffect, useMemo } from 'react';
+import { auth, authorizedEmails } from './data/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc, addDoc } from 'firebase/firestore';
-import { 
-  LogIn, 
-  LogOut, 
-  Plus, 
-  Search, 
-  Filter, 
-  SlidersHorizontal, 
-  BookOpen, 
-  UserCheck,
-  AlertCircle,
+import {
+  LogIn,
+  LogOut,
+  Plus,
+  Search,
+  Filter,
+  SlidersHorizontal,
+  BookOpen,
   Volume2,
   TrendingUp
 } from 'lucide-react';
 
-import BookCard from './components/BookCard';
-import BookDetails from './components/BookDetails';
-import AdminPanel from './components/AdminPanel';
-import LoginModal from './components/LoginModal';
-import FlamingoIcon from './components/FlamingoIcon';
-import VoiceAssistant from './components/VoiceAssistant';
-import ClubDashboard from './components/ClubDashboard';
-
-// High-quality mock books for Demo Mode
-const MOCK_BOOKS = [];
+import BookCard from './features/catalog/BookCard';
+import BookDetails from './features/book-details/BookDetails';
+import AdminPanel from './features/admin/AdminPanel';
+import LoginModal from './features/admin/LoginModal';
+import FlamingoIcon from './ui/FlamingoIcon';
+import SessionStudio from './features/session-studio/SessionStudio';
+import ClubDashboard from './features/dashboard/ClubDashboard';
+import { useBooks } from './data/useBooks';
 
 export default function App() {
-  const [books, setBooks] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { books, loading } = useBooks();
   const [user, setUser] = useState(null);
-  const [isDemoMode, setIsDemoMode] = useState(false);
 
   // Modal states
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [selectedBook, setSelectedBook] = useState(null);
+  const [selectedBookId, setSelectedBookId] = useState(null);
   const [editingBook, setEditingBook] = useState(null);
-  const [isGeneralVoiceOpen, setIsGeneralVoiceOpen] = useState(false);
+  const [isStudioOpen, setIsStudioOpen] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
 
   // Filters and sorting states
@@ -47,321 +40,87 @@ export default function App() {
   const [selectedStatus, setSelectedStatus] = useState('');
   const [sortBy, setSortBy] = useState('newest');
 
-  // Verify Firebase credentials are present, otherwise activate Demo Mode
-  const hasFirebaseConfig = !!(
-    import.meta.env.VITE_FIREBASE_API_KEY && 
-    import.meta.env.VITE_FIREBASE_API_KEY !== 'your_api_key_here' &&
-    auth &&
-    db
-  );
-
-  // 1. Auth Listener
+  // Auth listener. This is a UX gate only: write access is enforced by
+  // firestore.rules / storage.rules on the server.
   useEffect(() => {
-    if (!auth) {
-      setUser(null);
-      return;
-    }
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        // If they logged in with Google but do not have the GCP access token in localStorage,
-        // it means they logged in before the update. We force sign out to refresh their scopes.
-        const isGoogleUser = currentUser.providerData.some(p => p.providerId === 'google.com');
-        const hasGcpToken = !!localStorage.getItem('flamingo_gcp_access_token');
-        
-        if (isGoogleUser && !hasGcpToken) {
-          console.warn("Google user detected without GCP access token. Force signing out to refresh scopes.");
-          signOut(auth).catch(err => console.error(err));
-          setUser(null);
-          return;
-        }
-
-        // Double check admin email restrictions
-        const emailLower = currentUser.email ? currentUser.email.toLowerCase() : '';
-        const isAuthorized = authorizedEmails.includes(emailLower);
-        if (!isAuthorized) {
-          signOut(auth).catch(err => console.error(err));
-          setUser(null);
-        } else {
-          setUser(currentUser);
-        }
+      if (!currentUser) {
+        setUser(null);
+        return;
+      }
+      const emailLower = currentUser.email ? currentUser.email.toLowerCase() : '';
+      if (authorizedEmails.includes(emailLower)) {
+        setUser(currentUser);
       } else {
+        signOut(auth).catch((err) => console.error(err));
         setUser(null);
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // 2. Fetch Books (Firestore or Demo Fallback)
-  useEffect(() => {
-    if (!hasFirebaseConfig || !db) {
-      console.warn("Firebase configuration not found or database not initialized. Running in Demo Mode.");
-      setBooks(MOCK_BOOKS);
-      setIsDemoMode(true);
-      setLoading(false);
-      return;
-    }
-
-    setIsDemoMode(false);
-    const booksRef = collection(db, 'books');
-    const q = query(booksRef, orderBy('createdAt', 'desc'));
-
-    // Set a safety timeout to prevent infinite loading screens
-    const safetyTimeout = setTimeout(() => {
-      console.warn("Firestore onSnapshot timed out. Setting loading to false as a safety measure.");
-      setLoading(false);
-    }, 4000);
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      clearTimeout(safetyTimeout);
-      const booksData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setBooks(booksData);
-      setLoading(false);
-    }, (error) => {
-      clearTimeout(safetyTimeout);
-      console.error("Firestore loading error, falling back to Demo Mode:", error);
-      setIsDemoMode(true);
-      setBooks(MOCK_BOOKS);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [hasFirebaseConfig]);
-
-  // Log out handler
   const handleLogout = async () => {
-    if (!auth) return;
     try {
-      localStorage.removeItem('flamingo_gcp_access_token');
       await signOut(auth);
     } catch (err) {
-      console.error("Log out failed:", err);
+      console.error('Log out failed:', err);
     }
   };
 
-  // Extract unique genres dynamically
+  // Keep the details modal in sync with realtime book updates.
+  const selectedBook = useMemo(
+    () => books.find((b) => b.id === selectedBookId) || null,
+    [books, selectedBookId]
+  );
+
   const genres = useMemo(() => {
-    const allGenres = books.map(b => b.genre).filter(Boolean);
-    return ['All', ...new Set(allGenres)];
+    const allGenres = books.map((b) => b.genre).filter(Boolean);
+    return [...new Set(allGenres)];
   }, [books]);
 
-  // Filtering and Sorting logic
   const filteredAndSortedBooks = useMemo(() => {
     let result = [...books];
 
-    // Search query filter
     if (searchQuery.trim() !== '') {
       const q = searchQuery.toLowerCase();
-      result = result.filter(b => 
-        b.title.toLowerCase().includes(q) ||
-        b.author.toLowerCase().includes(q) ||
-        b.summary.toLowerCase().includes(q) ||
-        b.genre.toLowerCase().includes(q)
+      result = result.filter((b) =>
+        (b.title || '').toLowerCase().includes(q) ||
+        (b.author || '').toLowerCase().includes(q) ||
+        (b.summary || '').toLowerCase().includes(q) ||
+        (b.genre || '').toLowerCase().includes(q)
       );
     }
 
-    // Genre filter
-    if (selectedGenre && selectedGenre !== 'All') {
-      result = result.filter(b => b.genre === selectedGenre);
+    if (selectedGenre) {
+      result = result.filter((b) => b.genre === selectedGenre);
     }
-
-    // Status filter
     if (selectedStatus) {
-      result = result.filter(b => b.status === selectedStatus);
+      result = result.filter((b) => b.status === selectedStatus);
     }
 
-    // Sorting
     result.sort((a, b) => {
-      if (sortBy === 'newest') {
-        return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
-      }
-      if (sortBy === 'oldest') {
-        return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
-      }
-      if (sortBy === 'rating') {
-        return b.rating - a.rating;
-      }
-      if (sortBy === 'title') {
-        return a.title.localeCompare(b.title);
-      }
+      if (sortBy === 'newest') return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+      if (sortBy === 'oldest') return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+      if (sortBy === 'rating') return b.rating - a.rating;
+      if (sortBy === 'title') return a.title.localeCompare(b.title);
       return 0;
     });
 
     return result;
   }, [books, searchQuery, selectedGenre, selectedStatus, sortBy]);
 
-  // Trigger editing a book
   const startEdit = (book) => {
     setEditingBook(book);
     setIsAdminOpen(true);
   };
 
-  // Trigger adding a book
   const startAdd = () => {
     setEditingBook(null);
     setIsAdminOpen(true);
   };
 
-  const handleSaveSuccess = () => {
-    // If we were viewing details of the book being edited, update selectedBook
-    if (selectedBook && editingBook && selectedBook.id === editingBook.id) {
-      const updated = books.find(b => b.id === editingBook.id);
-      setSelectedBook(updated || null);
-    }
-  };
-
-  const handleDeleteBook = async (bookId) => {
-    if (isDemoMode) {
-      setBooks((prev) => prev.filter((b) => b.id !== bookId));
-    } else {
-      await deleteDoc(doc(db, 'books', bookId));
-    }
-    if (selectedBook && selectedBook.id === bookId) {
-      setSelectedBook(null);
-    }
-  };
-
-  const handleApplyNotesToBook = async (bookId, notesMarkdown, grades = null, generalSummary = null, transcriptionId = null) => {
-    const updateData = { privateNotes: notesMarkdown };
-    if (grades) updateData.grades = grades;
-    
-    // Only update summary (synopsis) if current is empty to prevent overwriting
-    if (generalSummary) {
-      const currentBook = books.find(b => b.id === bookId);
-      if (!currentBook || !currentBook.summary) {
-        updateData.summary = generalSummary;
-      }
-    }
-
-    if (transcriptionId) {
-      updateData.transcriptionId = transcriptionId;
-    }
-
-    if (isDemoMode) {
-      setBooks((prev) => prev.map((b) => b.id === bookId ? { ...b, ...updateData } : b));
-      
-      // Update local storage for transcription to reference the bookId in demo mode
-      if (transcriptionId) {
-        try {
-          const currentHistory = JSON.parse(localStorage.getItem('flamingo_transcription_history') || '[]');
-          const updatedHistory = currentHistory.map(item => {
-            if (item.id === transcriptionId || item.createdAt === transcriptionId) {
-              return { ...item, bookId };
-            }
-            return item;
-          });
-          localStorage.setItem('flamingo_transcription_history', JSON.stringify(updatedHistory));
-        } catch (e) {
-          console.warn("Failed to update local transcription in demo mode:", e);
-        }
-      }
-    } else {
-      const bookRef = doc(db, 'books', bookId);
-      await updateDoc(bookRef, updateData);
-
-      // Bidirectional reference update
-      if (transcriptionId) {
-        try {
-          const transRef = doc(db, 'transcriptions', transcriptionId);
-          await updateDoc(transRef, { bookId });
-        } catch (e) {
-          console.warn("Failed to update bookId on transcription:", e);
-        }
-      }
-    }
-
-    if (selectedBook && selectedBook.id === bookId) {
-      setSelectedBook(prev => ({ ...prev, ...updateData }));
-    }
-  };
-
-  const handleCreateBookFromSession = async (title, author, genre, notesMarkdown, grades = null, generalSummary = null, transcriptionId = null) => {
-    const newBook = {
-      title: title.trim(),
-      author: author.trim(),
-      genre: (genre || 'Debate').trim(),
-      rating: 5,
-      status: 'completed',
-      startDate: new Date().toISOString().split('T')[0],
-      endDate: new Date().toISOString().split('T')[0],
-      summary: generalSummary || '',
-      review: '',
-      privateNotes: notesMarkdown,
-      grades: grades || { start: {}, end: {} },
-      imageUrl: 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?auto=format&fit=crop&q=80&w=300',
-      quotes: [],
-      references: [],
-      transcriptionId: transcriptionId || null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    let createdId = '';
-    if (isDemoMode) {
-      createdId = 'demo_' + Date.now();
-      const bookWithId = { ...newBook, id: createdId };
-      setBooks(prev => [bookWithId, ...prev]);
-
-      // Update local storage for transcription to reference the new bookId in demo mode
-      if (transcriptionId) {
-        try {
-          const currentHistory = JSON.parse(localStorage.getItem('flamingo_transcription_history') || '[]');
-          const updatedHistory = currentHistory.map(item => {
-            if (item.id === transcriptionId || item.createdAt === transcriptionId) {
-              return { ...item, bookId: createdId };
-            }
-            return item;
-          });
-          localStorage.setItem('flamingo_transcription_history', JSON.stringify(updatedHistory));
-        } catch (e) {
-          console.warn("Failed to update local transcription in demo mode:", e);
-        }
-      }
-    } else {
-      const docRef = await addDoc(collection(db, 'books'), newBook);
-      createdId = docRef.id;
-
-      // Bidirectional reference update
-      if (transcriptionId) {
-        try {
-          const transRef = doc(db, 'transcriptions', transcriptionId);
-          await updateDoc(transRef, { bookId: createdId });
-        } catch (e) {
-          console.warn("Failed to update bookId on transcription:", e);
-        }
-      }
-    }
-
-    return createdId;
-  };
-
   return (
     <div>
-      {/* Demo Mode Notice */}
-      {isDemoMode && (
-        <div style={{
-          background: 'linear-gradient(135deg, rgba(255, 26, 117, 0.12) 0%, rgba(255, 107, 53, 0.12) 100%)',
-          borderBottom: '1px solid rgba(255, 26, 117, 0.22)',
-          padding: '0.75rem 1rem',
-          textAlign: 'center',
-          fontSize: '0.85rem',
-          color: '#f4f4f7',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '0.5rem',
-          fontWeight: '500',
-          backdropFilter: 'blur(8px)',
-          position: 'relative',
-          zIndex: 101
-        }}>
-          <AlertCircle size={16} style={{ color: 'var(--primary)' }} />
-          <span>Estás en <strong>Modo Demo</strong>. Configura Firebase en <code>.env</code> para sincronizar en la nube. Lee la <a href="file:///Users/dous/.gemini/antigravity/brain/437e6910-277f-4c84-8790-e40dcf39dbd6/gcp_setup_instructions.md" style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: '600' }}>Guía de Configuración</a>.</span>
-        </div>
-      )}
-
       {/* Main Navbar */}
       <header className="header-wrapper">
         <div className="header-content">
@@ -380,7 +139,7 @@ export default function App() {
                   <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--sage)', display: 'inline-block', boxShadow: '0 0 8px var(--sage)' }}></span>
                   Admin Activo
                 </span>
-                <button className="btn btn-secondary" onClick={() => setIsGeneralVoiceOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <button className="btn btn-secondary" onClick={() => setIsStudioOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                   <Volume2 size={15} /> Sesión de Club
                 </button>
                 <button className="btn btn-primary" onClick={startAdd}>
@@ -415,7 +174,6 @@ export default function App() {
           </div>
 
           <div className="filter-group">
-            {/* Genre filter */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <Filter size={14} style={{ color: 'var(--text-muted)' }} />
               <select
@@ -425,13 +183,12 @@ export default function App() {
                 onChange={(e) => setSelectedGenre(e.target.value)}
               >
                 <option value="">Todos los géneros</option>
-                {genres.filter(g => g !== 'All').map(g => (
+                {genres.map((g) => (
                   <option key={g} value={g}>{g}</option>
                 ))}
               </select>
             </div>
 
-            {/* Status filter */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <BookOpen size={14} style={{ color: 'var(--text-muted)' }} />
               <select
@@ -447,7 +204,6 @@ export default function App() {
               </select>
             </div>
 
-            {/* Sort options */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <SlidersHorizontal size={14} style={{ color: 'var(--text-muted)' }} />
               <select
@@ -473,11 +229,11 @@ export default function App() {
           </div>
         ) : filteredAndSortedBooks.length > 0 ? (
           <div className="books-grid">
-            {filteredAndSortedBooks.map(book => (
+            {filteredAndSortedBooks.map((book) => (
               <BookCard
                 key={book.id}
                 book={book}
-                onClick={() => setSelectedBook(book)}
+                onClick={() => setSelectedBookId(book.id)}
                 onEdit={startEdit}
                 isAdmin={!!user}
               />
@@ -524,37 +280,30 @@ export default function App() {
           isOpen={isAdminOpen}
           onClose={() => setIsAdminOpen(false)}
           editBook={editingBook}
-          onSaveSuccess={handleSaveSuccess}
-          isDemoMode={isDemoMode}
           books={books}
-          setBooks={setBooks}
-          onDeleteBook={handleDeleteBook}
         />
       )}
 
       {selectedBook && (
         <BookDetails
           book={selectedBook}
-          onClose={() => setSelectedBook(null)}
+          onClose={() => setSelectedBookId(null)}
           onEdit={(book) => {
-            setSelectedBook(null); // close details
-            startEdit(book); // open edit panel
+            setSelectedBookId(null);
+            startEdit(book);
           }}
           isAdmin={!!user}
-          isDemoMode={isDemoMode}
         />
       )}
 
-      {isGeneralVoiceOpen && (
-        <VoiceAssistant
-          isOpen={isGeneralVoiceOpen}
-          onClose={() => setIsGeneralVoiceOpen(false)}
-          isDemoMode={isDemoMode}
+      {isStudioOpen && (
+        <SessionStudio
+          isOpen={isStudioOpen}
+          onClose={() => setIsStudioOpen(false)}
           books={books}
-          onApplyNotesToBook={handleApplyNotesToBook}
-          onCreateBookFromSession={handleCreateBookFromSession}
         />
       )}
+
       {isStatsOpen && (
         <ClubDashboard
           isOpen={isStatsOpen}

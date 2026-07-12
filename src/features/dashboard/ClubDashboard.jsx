@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { X, TrendingUp, Users, BookOpen, Star, Sparkles, Award } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { X, TrendingUp, Users, BookOpen, Sparkles, Award } from 'lucide-react';
 
 export default function ClubDashboard({ isOpen, onClose, books = [] }) {
   const [sortField, setSortField] = useState('date');
@@ -207,7 +207,7 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                 {stats.bestBook && (
                   <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', padding: '1rem', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                     <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                      <Award size={12} style={{ color: '#fbbf24' }} /> LIBRO FAVORITO
+                      <Award size={12} style={{ color: 'var(--accent-gold)' }} /> LIBRO FAVORITO
                     </span>
                     <span style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={stats.bestBook.book.title}>
                       {stats.bestBook.book.title}
@@ -252,12 +252,12 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                   <svg width="100%" height="220" viewBox="0 0 650 220" style={{ display: 'block', margin: '0 auto', minWidth: '550px' }}>
                     <defs>
                       <linearGradient id="areaStartGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.15" />
-                        <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.0" />
+                        <stop offset="0%" stopColor="var(--accent-gold)" stopOpacity="0.15" />
+                        <stop offset="100%" stopColor="var(--accent-gold)" stopOpacity="0.0" />
                       </linearGradient>
                       <linearGradient id="areaEndGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#10b981" stopOpacity="0.15" />
-                        <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+                        <stop offset="0%" stopColor="var(--sage)" stopOpacity="0.15" />
+                        <stop offset="100%" stopColor="var(--sage)" stopOpacity="0.0" />
                       </linearGradient>
                     </defs>
 
@@ -319,8 +319,8 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                           <path d={endAreaD} fill="url(#areaEndGrad)" />
 
                           {/* Lines */}
-                          <path d={startLineD} fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                          <path d={endLineD} fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d={startLineD} fill="none" stroke="var(--accent-gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d={endLineD} fill="none" stroke="var(--sage)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
 
                           {/* Circles & Labels */}
                           {points.map((p, idx) => (
@@ -329,10 +329,10 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                               <line x1={p.x} y1="180" x2={p.x} y2={Math.min(p.startY, p.endY) - 5} stroke="rgba(255,255,255,0.03)" />
                               
                               {/* Start point circle */}
-                              <circle cx={p.x} cy={p.startY} r="3.5" fill="#f59e0b" stroke="var(--bg-card)" strokeWidth="1" />
+                              <circle cx={p.x} cy={p.startY} r="3.5" fill="var(--accent-gold)" stroke="var(--bg-card)" strokeWidth="1" />
                               
                               {/* End point circle */}
-                              <circle cx={p.x} cy={p.endY} r="4.5" fill="#10b981" stroke="var(--bg-card)" strokeWidth="1" />
+                              <circle cx={p.x} cy={p.endY} r="4.5" fill="var(--sage)" stroke="var(--bg-card)" strokeWidth="1" />
                               
                               {/* Text label underneath */}
                               <text x={p.x} y="196" fill="var(--text-primary)" fontSize="8.5" fontWeight="bold" textAnchor="middle" transform={`rotate(-15, ${p.x}, 196)`} style={{ maxWidth: '75px', overflow: 'hidden' }}>
@@ -349,12 +349,12 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                     
                     {/* Legend */}
                     <g transform="translate(480, 10)">
-                      <line x1="0" y1="5" x2="15" y2="5" stroke="#f59e0b" strokeWidth="2" />
-                      <circle cx="7.5" cy="5" r="2.5" fill="#f59e0b" />
+                      <line x1="0" y1="5" x2="15" y2="5" stroke="var(--accent-gold)" strokeWidth="2" />
+                      <circle cx="7.5" cy="5" r="2.5" fill="var(--accent-gold)" />
                       <text x="20" y="8" fill="var(--text-muted)" fontSize="9">Nota Inicial</text>
                       
-                      <line x1="0" y1="18" x2="15" y2="18" stroke="#10b981" strokeWidth="2" />
-                      <circle cx="7.5" cy="18" r="3" fill="#10b981" />
+                      <line x1="0" y1="18" x2="15" y2="18" stroke="var(--sage)" strokeWidth="2" />
+                      <circle cx="7.5" cy="18" r="3" fill="var(--sage)" />
                       <text x="20" y="21" fill="var(--text-muted)" fontSize="9">Nota Final</text>
                     </g>
                   </svg>
@@ -393,13 +393,13 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                         return (
                           <g key={m.name}>
                             {/* Start bar */}
-                            <rect x={xBase} y={sY} width="12" height={sHeight} fill="#f59e0b" rx="2" />
+                            <rect x={xBase} y={sY} width="12" height={sHeight} fill="var(--accent-gold)" rx="2" />
                             <text x={xBase + 6} y={sY - 4} fill="var(--text-primary)" fontSize="8.5" fontWeight="bold" textAnchor="middle">
                               {m.startAvg.toFixed(1)}
                             </text>
 
                             {/* End bar */}
-                            <rect x={xBase + 14} y={eY} width="12" height={eHeight} fill="#10b981" rx="2" />
+                            <rect x={xBase + 14} y={eY} width="12" height={eHeight} fill="var(--sage)" rx="2" />
                             <text x={xBase + 20} y={eY - 4} fill="var(--text-primary)" fontSize="8.5" fontWeight="bold" textAnchor="middle">
                               {m.endAvg.toFixed(1)}
                             </text>
@@ -415,9 +415,9 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                       <line x1="40" y1="170" x2="330" y2="170" stroke="var(--border)" strokeWidth="1" />
                       
                       <g transform="translate(180, 198)">
-                        <rect x="0" y="0" width="8" height="8" fill="#f59e0b" rx="2" />
+                        <rect x="0" y="0" width="8" height="8" fill="var(--accent-gold)" rx="2" />
                         <text x="12" y="8" fill="var(--text-muted)" fontSize="8.5">Nota Inicial</text>
-                        <rect x="70" y="0" width="8" height="8" fill="#10b981" rx="2" />
+                        <rect x="70" y="0" width="8" height="8" fill="var(--sage)" rx="2" />
                         <text x="82" y="8" fill="var(--text-muted)" fontSize="8.5">Nota Final</text>
                       </g>
                     </svg>
@@ -484,9 +484,9 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                           <td style={{ padding: '0.75rem 0.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                             {new Date(b.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
                           </td>
-                          <td style={{ padding: '0.75rem 0.5rem', textAlign: 'center', color: '#fb923c', fontWeight: 'bold' }}>{b.startAvg.toFixed(1)}</td>
-                          <td style={{ padding: '0.75rem 0.5rem', textAlign: 'center', color: '#34d399', fontWeight: 'bold' }}>{b.endAvg.toFixed(1)}</td>
-                          <td style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 'bold', color: b.delta >= 0 ? '#34d399' : '#fb7185' }}>
+                          <td style={{ padding: '0.75rem 0.5rem', textAlign: 'center', color: 'var(--accent-gold)', fontWeight: 'bold' }}>{b.startAvg.toFixed(1)}</td>
+                          <td style={{ padding: '0.75rem 0.5rem', textAlign: 'center', color: 'var(--sage)', fontWeight: 'bold' }}>{b.endAvg.toFixed(1)}</td>
+                          <td style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 'bold', color: b.delta >= 0 ? 'var(--sage)' : 'var(--accent-coral)' }}>
                             {b.delta >= 0 ? `+${b.delta.toFixed(1)}` : b.delta.toFixed(1)}
                           </td>
                         </tr>

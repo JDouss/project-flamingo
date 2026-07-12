@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Star, Edit2, Calendar } from 'lucide-react';
 
 export default function BookCard({ book, onClick, onEdit, isAdmin }) {

@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
-import { db, storage } from '../firebase';
-import { collection, addDoc, doc, updateDoc, getDocs } from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { X, Plus, Trash2, UploadCloud, BookOpen, Save, Link, Quote, Star, Sparkles, Maximize2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import VoiceAssistant from './VoiceAssistant';
-import { renderMarkdown } from '../utils/markdown';
+import { renderMarkdown } from '../../utils/markdown';
+import { useMembers } from '../../data/useMembers';
+import { useSessionList } from '../../data/useSessions';
+import { saveBook, deleteBook, uploadCover, linkSessionToBook } from '../../data/mutations';
 
-export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, isDemoMode, books, setBooks, onDeleteBook }) {
+export default function AdminPanel({ isOpen, onClose, editBook, books }) {
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [genre, setGenre] = useState('');
@@ -33,99 +32,37 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [isVoiceAssistantOpen, setIsVoiceAssistantOpen] = useState(false);
 
   // Fullscreen editor state
   const [isFullscreenEditorOpen, setIsFullscreenEditorOpen] = useState(false);
   const [fullscreenReviewText, setFullscreenReviewText] = useState('');
 
-  const handleApplyVoiceNotes = (notesMarkdown) => {
-    setPrivateNotes(notesMarkdown);
-  };
-
-  const [sessionDrafts, setSessionDrafts] = useState([]);
-  const [loadingDrafts, setLoadingDrafts] = useState(false);
   const [showDraftSelector, setShowDraftSelector] = useState(false);
   const [selectedDraftId, setSelectedDraftId] = useState('');
   const [selectedAttendeeName, setSelectedAttendeeName] = useState('');
 
   // Member grades states
   const [grades, setGrades] = useState({ start: {}, end: {} });
-  const [members, setMembers] = useState([]);
-
-  useEffect(() => {
-    const fetchMembers = async () => {
-      try {
-        let list = [];
-        if (!isDemoMode) {
-          const querySnapshot = await getDocs(collection(db, 'speakers_registry'));
-          list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        } else {
-          list = JSON.parse(localStorage.getItem('flamingo_speakers_registry') || '[]');
-        }
-        
-        if (list.length === 0) {
-          list = [
-            { id: 'miembro_1', name: 'Jaime' },
-            { id: 'miembro_2', name: 'Almu' },
-            { id: 'miembro_3', name: 'Alejandro' },
-            { id: 'miembro_4', name: 'Joaquin' },
-            { id: 'miembro_5', name: 'Zepe' }
-          ];
-        }
-        setMembers(list);
-      } catch (e) {
-        console.error("Error fetching members:", e);
-      }
-    };
-    if (isOpen) {
-      fetchMembers();
-    }
-  }, [isOpen, isDemoMode]);
-
-  const fetchSessionDrafts = async () => {
-    setLoadingDrafts(true);
-    try {
-      let list = [];
-      if (!isDemoMode) {
-        // Fetch from Firestore
-        const querySnapshot = await getDocs(collection(db, 'transcriptions'));
-        list = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-      } else {
-        // Fetch from LocalStorage
-        list = JSON.parse(localStorage.getItem('flamingo_transcription_history') || '[]');
-      }
-      
-      // Sort by date descending
-      list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      setSessionDrafts(list);
-    } catch (err) {
-      console.error("Error al cargar borradores de sesión:", err);
-    } finally {
-      setLoadingDrafts(false);
-    }
-  };
-
-  useEffect(() => {
-    if (isOpen) {
-      fetchSessionDrafts();
-    }
-  }, [isOpen]);
+  const { members } = useMembers();
+  const {
+    sessions: sessionDrafts,
+    loading: loadingDrafts,
+    refresh: fetchSessionDrafts,
+  } = useSessionList(isOpen);
 
   const handleImportSessionDraft = () => {
     if (!selectedDraftId) return;
     const session = sessionDrafts.find(d => d.id === selectedDraftId || d.createdAt === selectedDraftId);
     if (!session) return;
     
-    const isNewFormat = !!(session.sessionSummaryMarkdown || session.result?.sessionSummaryMarkdown);
+    // Pipeline sessions carry their result under `analysis`; older formats
+    // stored fields at the top level or under `result`.
+    const analysis = session.analysis || session.result || session;
+    const isNewFormat = !!analysis.sessionSummaryMarkdown;
 
     if (isNewFormat) {
-      const summaryMarkdown = session.sessionSummaryMarkdown || session.result?.sessionSummaryMarkdown || '';
-      setPrivateNotes(summaryMarkdown);
-      setSummary(session.generalSummary || session.result?.generalSummary || '');
+      setPrivateNotes(analysis.sessionSummaryMarkdown || '');
+      setSummary(analysis.generalSummary || '');
       setTranscriptionId(session.id || null);
 
       if (session.bookId && session.bookId !== 'new_book') {
@@ -136,16 +73,13 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
           setGenre(matchingBook.genre || '');
         }
       } else {
-        const deducedTitle = session.bookTitle || session.result?.bookTitle || '';
-        const deducedAuthor = session.bookAuthor || session.result?.bookAuthor || '';
-        const deducedGenre = session.bookGenre || session.result?.bookGenre || '';
-        if (deducedTitle) setTitle(deducedTitle);
-        if (deducedAuthor) setAuthor(deducedAuthor);
-        if (deducedGenre) setGenre(deducedGenre);
+        if (analysis.bookTitle) setTitle(analysis.bookTitle);
+        if (analysis.bookAuthor) setAuthor(analysis.bookAuthor);
+        if (analysis.bookGenre || analysis.genre) setGenre(analysis.bookGenre || analysis.genre);
       }
 
-      if (session.grades) {
-        setGrades(session.grades);
+      if (analysis.grades || session.grades) {
+        setGrades(analysis.grades || session.grades);
       }
 
       alert("Borrador de sesión cargado con éxito. Se ha importado el resumen de la sesión y las calificaciones.");
@@ -311,44 +245,15 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
     setReferences(updated.length > 0 ? updated : [{ title: '', url: '' }]);
   };
 
-  // Upload Cover to Storage
-  const uploadImage = () => {
-    return new Promise((resolve, reject) => {
-      if (!imageFile) {
-        resolve(imageUrl); // Return existing URL if no new file is chosen
-        return;
-      }
-
-      if (isDemoMode) {
-        resolve(imagePreview); // use local preview in demo mode
-        return;
-      }
-
-      const storageRef = ref(storage, `covers/${Date.now()}_${imageFile.name}`);
-      const uploadTask = uploadBytesResumable(storageRef, imageFile);
-
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          const progress = Math.round(
-            (snapshot.bytesTransferred / snapshot.totalBytes) * 100
-          );
-          setUploadProgress(progress);
-        },
-        (err) => {
-          console.error(err);
-          reject(new Error('Error al subir la imagen de portada. Verifica las reglas de seguridad de almacenamiento.'));
-        },
-        async () => {
-          try {
-            const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-            resolve(downloadUrl);
-          } catch (err) {
-            reject(err);
-          }
-        }
-      );
-    });
+  // Upload Cover to Storage (keeps the existing URL when no new file chosen)
+  const uploadImage = async () => {
+    if (!imageFile) return imageUrl;
+    try {
+      return await uploadCover(imageFile, setUploadProgress);
+    } catch (err) {
+      console.error(err);
+      throw new Error('Error al subir la imagen de portada. Verifica las reglas de seguridad de almacenamiento.');
+    }
   };
 
   // Form Submit Handler
@@ -387,56 +292,17 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
         updatedAt: new Date().toISOString()
       };
 
-      let savedBookId = '';
-      if (editBook) {
-        // Edit Mode
-        savedBookId = editBook.id;
-        if (isDemoMode) {
-          const updatedBooks = books.map(b => b.id === editBook.id ? { ...b, ...bookData, id: editBook.id } : b);
-          setBooks(updatedBooks);
-        } else {
-          const docRef = doc(db, 'books', editBook.id);
-          await updateDoc(docRef, bookData);
-        }
-      } else {
-        // Add Mode
-        if (isDemoMode) {
-          savedBookId = 'mock-' + Date.now();
-          const newBook = {
-            ...bookData,
-            id: savedBookId,
-            createdAt: new Date().toISOString()
-          };
-          setBooks([newBook, ...books]);
-        } else {
-          bookData.createdAt = new Date().toISOString();
-          const docRef = await addDoc(collection(db, 'books'), bookData);
-          savedBookId = docRef.id;
-        }
+      if (!editBook) {
+        bookData.createdAt = new Date().toISOString();
       }
+      const savedBookId = await saveBook(editBook ? editBook.id : null, bookData);
 
       // Bidirectional reference update
       if (transcriptionId && savedBookId) {
-        if (!isDemoMode) {
-          try {
-            const transRef = doc(db, 'transcriptions', transcriptionId);
-            await updateDoc(transRef, { bookId: savedBookId });
-          } catch (e) {
-            console.warn("Failed to link transcription to book:", e);
-          }
-        } else {
-          try {
-            const currentHistory = JSON.parse(localStorage.getItem('flamingo_transcription_history') || '[]');
-            const updatedHistory = currentHistory.map(item => {
-              if (item.id === transcriptionId || item.createdAt === transcriptionId) {
-                return { ...item, bookId: savedBookId };
-              }
-              return item;
-            });
-            localStorage.setItem('flamingo_transcription_history', JSON.stringify(updatedHistory));
-          } catch (e) {
-            console.warn("Failed to link transcription to book in local storage:", e);
-          }
+        try {
+          await linkSessionToBook(transcriptionId, savedBookId);
+        } catch (e) {
+          console.warn('Failed to link session to book:', e);
         }
       }
 
@@ -445,10 +311,9 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
         particleCount: 100,
         spread: 70,
         origin: { y: 0.6 },
-        colors: ['#f59e0b', '#ec4899', '#3b82f6', '#10b981']
+        colors: ['#fec313', '#ff1a75', '#00f0ff', '#00f5a0']
       });
 
-      onSaveSuccess();
       onClose();
     } catch (err) {
       console.error(err);
@@ -466,7 +331,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
       setSaving(true);
       setError('');
       try {
-        await onDeleteBook(editBook.id);
+        await deleteBook(editBook.id);
         onClose();
       } catch (err) {
         console.error(err);
@@ -568,7 +433,8 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
 
                       {selectedDraftId && (() => {
                         const session = sessionDrafts.find(d => d.id === selectedDraftId || d.createdAt === selectedDraftId);
-                        const isNewFormat = session ? !!(session.sessionSummaryMarkdown || session.result?.sessionSummaryMarkdown) : false;
+                        const sessionAnalysis = session ? (session.analysis || session.result || session) : null;
+                        const isNewFormat = !!sessionAnalysis?.sessionSummaryMarkdown;
                         
                         if (isNewFormat) {
                           return (
@@ -846,14 +712,6 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
                 <label className="form-label" style={{ color: 'var(--primary)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: 0 }}>
                   Resumen y Memoria de la Sesión <span style={{ fontSize: '0.75rem', fontWeight: 'normal', color: 'var(--text-muted)' }}>(Público para todos los miembros)</span>
                 </label>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', borderColor: 'var(--primary)', color: 'var(--primary)' }}
-                  onClick={() => setIsVoiceAssistantOpen(true)}
-                >
-                  <Sparkles size={12} /> Generar desde audio
-                </button>
               </div>
               <textarea
                 className="form-textarea"
@@ -1085,15 +943,6 @@ export default function AdminPanel({ isOpen, onClose, editBook, onSaveSuccess, i
           </button>
         </div>
       </div>
-
-      <VoiceAssistant
-        isOpen={isVoiceAssistantOpen}
-        onClose={() => setIsVoiceAssistantOpen(false)}
-        onApplyNotes={handleApplyVoiceNotes}
-        isDemoMode={isDemoMode}
-        bookId={editBook?.id || null}
-        books={books}
-      />
 
       {isFullscreenEditorOpen && (
         <div className="fullscreen-editor-overlay">

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { auth, googleProvider, adminEmail, authorizedEmails } from '../firebase';
-import { signInWithPopup, signInWithEmailAndPassword, GoogleAuthProvider } from 'firebase/auth';
+import { useState } from 'react';
+import { auth, googleProvider, authorizedEmails } from '../../data/firebase';
+import { signInWithPopup, signInWithEmailAndPassword } from 'firebase/auth';
 import { X, LogIn, Mail, Lock, ShieldAlert } from 'lucide-react';
 
 export default function LoginModal({ isOpen, onClose }) {
@@ -21,16 +21,8 @@ export default function LoginModal({ isOpen, onClose }) {
       }
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
-      
-      // Extract Google OAuth Access Token
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      const accessToken = credential?.accessToken;
-      if (accessToken) {
-        localStorage.setItem('flamingo_gcp_access_token', accessToken);
-        console.log("Captured Google GCP Access Token successfully.");
-      }
-      
-      // If VITE_ADMIN_EMAIL is set, enforce authorization checks on the client side
+
+      // UX-level check only; real enforcement lives in Firestore/Storage rules
       const emailLower = user.email ? user.email.toLowerCase() : '';
       if (!authorizedEmails.includes(emailLower)) {
         // Sign out automatically if not authorized

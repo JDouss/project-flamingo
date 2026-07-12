@@ -17,5 +17,17 @@ export default defineConfig([
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
+    rules: {
+      // Standard fetch/subscribe hook patterns set state inside effects;
+      // keep the signal but don't fail the build on it.
+      'react-hooks/set-state-in-effect': 'warn',
+      'preserve-caught-error': 'warn',
+    },
+  },
+  {
+    files: ['functions/**/*.js'],
+    languageOptions: {
+      globals: globals.node,
+    },
   },
 ])

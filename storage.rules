@@ -1,0 +1,47 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() in [
+          'doussinague95@gmail.com'
+        ];
+    }
+
+    // Session recordings: uploaded by admins, played back publicly.
+    // 100 MB cap keeps runaway uploads (and function memory) in check.
+    match /recordings/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin()
+        && request.resource.size < 100 * 1024 * 1024
+        && request.resource.contentType.matches('audio/.*');
+    }
+
+    // Diarized transcripts: written only by the Cloud Function (Admin SDK
+    // bypasses rules), read publicly on demand from BookDetails.
+    match /transcripts/{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Book cover images.
+    match /covers/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin()
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Legacy voiceprints (feature removed): keep readable, block new writes.
+    match /voiceprints/{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

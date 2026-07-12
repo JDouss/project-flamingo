@@ -1,43 +1,47 @@
-import React, { useState, useEffect } from 'react';
-import { X, Star, Calendar, ChevronLeft, ChevronRight, Quote, Link, Edit2, Volume2, FileText } from 'lucide-react';
-import { renderMarkdown } from '../utils/markdown';
-import { db } from '../firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { useState, useEffect } from 'react';
+import { X, Star, ChevronLeft, ChevronRight, Quote, Link, Edit2, Volume2 } from 'lucide-react';
+import { renderMarkdown } from '../../utils/markdown';
+import { fetchSessionById, fetchTranscript } from '../../data/useSessions';
 
-export default function BookDetails({ book, onClose, onEdit, isAdmin, isDemoMode }) {
+export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
   const [activeQuoteIdx, setActiveQuoteIdx] = useState(0);
   const [sessionData, setSessionData] = useState(null);
   const [loadingSession, setLoadingSession] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [loadingTranscript, setLoadingTranscript] = useState(false);
 
   useEffect(() => {
-    if (book && book.transcriptionId) {
-      const fetchSession = async () => {
-        setLoadingSession(true);
-        try {
-          if (!isDemoMode && db) {
-            const docRef = doc(db, 'transcriptions', book.transcriptionId);
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-              setSessionData(docSnap.data());
-            }
-          } else {
-            const currentHistory = JSON.parse(localStorage.getItem('flamingo_transcription_history') || '[]');
-            const session = currentHistory.find(item => item.id === book.transcriptionId || item.createdAt === book.transcriptionId);
-            if (session) {
-              setSessionData(session);
-            }
-          }
-        } catch (err) {
-          console.error("Error fetching session details in BookDetails:", err);
-        } finally {
-          setLoadingSession(false);
-        }
-      };
-      fetchSession();
-    } else {
-      setSessionData(null);
+    setSessionData(null);
+    setTranscript('');
+    if (!book?.transcriptionId) return;
+
+    let cancelled = false;
+    setLoadingSession(true);
+    fetchSessionById(book.transcriptionId)
+      .then((session) => {
+        if (!cancelled) setSessionData(session);
+      })
+      .catch((err) => console.error('Error fetching session details:', err))
+      .finally(() => {
+        if (!cancelled) setLoadingSession(false);
+      });
+    return () => { cancelled = true; };
+  }, [book]);
+
+  // The full transcript lives in Storage: download it only when the user
+  // expands the section, so the details modal stays light.
+  const handleTranscriptToggle = async (e) => {
+    if (!e.currentTarget.open || transcript || loadingTranscript) return;
+    setLoadingTranscript(true);
+    try {
+      setTranscript(await fetchTranscript(sessionData));
+    } catch (err) {
+      console.error('Transcript download failed:', err);
+      setTranscript('No se pudo descargar la transcripción.');
+    } finally {
+      setLoadingTranscript(false);
     }
-  }, [book, isDemoMode]);
+  };
 
   if (!book) return null;
 
@@ -202,12 +206,12 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, isDemoMode
                     {/* Definitions for Gradients */}
                     <defs>
                       <linearGradient id="startGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#f59e0b" />
-                        <stop offset="100%" stopColor="#d97706" />
+                        <stop offset="0%" stopColor="var(--accent-gold)" />
+                        <stop offset="100%" stopColor="var(--accent-gold)" stopOpacity="0.7" />
                       </linearGradient>
                       <linearGradient id="endGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#10b981" />
-                        <stop offset="100%" stopColor="#059669" />
+                        <stop offset="0%" stopColor="var(--sage)" />
+                        <stop offset="100%" stopColor="var(--sage)" stopOpacity="0.7" />
                       </linearGradient>
                     </defs>
 
@@ -310,9 +314,9 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, isDemoMode
                         return (
                           <tr key={m} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
                             <td style={{ padding: '0.5rem', fontWeight: 'bold' }}>{m}</td>
-                            <td style={{ padding: '0.5rem', textAlign: 'center', color: '#fb923c' }}>{sVal !== undefined ? sVal : '—'}</td>
-                            <td style={{ padding: '0.5rem', textAlign: 'center', color: '#34d399' }}>{eVal !== undefined ? eVal : '—'}</td>
-                            <td style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 'bold', color: diff > 0 ? '#34d399' : diff < 0 ? '#fb7185' : 'var(--text-muted)' }}>
+                            <td style={{ padding: '0.5rem', textAlign: 'center', color: 'var(--accent-gold)' }}>{sVal !== null ? sVal : '—'}</td>
+                            <td style={{ padding: '0.5rem', textAlign: 'center', color: 'var(--sage)' }}>{eVal !== null ? eVal : '—'}</td>
+                            <td style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 'bold', color: diff > 0 ? 'var(--sage)' : diff < 0 ? 'var(--accent-coral)' : 'var(--text-muted)' }}>
                               {diff !== null ? (diff > 0 ? `+${diff}` : diff) : '—'}
                             </td>
                           </tr>
@@ -488,13 +492,16 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, isDemoMode
                 </p>
               )}
 
-              {sessionData.transcript && (
-                <details style={{
-                  background: 'var(--bg-secondary)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                  padding: '0.75rem 1rem'
-                }}>
+              {(sessionData.transcript || sessionData.transcriptPath) && (
+                <details
+                  onToggle={handleTranscriptToggle}
+                  style={{
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '0.75rem 1rem'
+                  }}
+                >
                   <summary style={{ fontWeight: '600', fontSize: '0.85rem', color: 'var(--text-primary)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>Ver transcripción completa de diálogos</span>
                   </summary>
@@ -512,7 +519,7 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, isDemoMode
                     color: 'var(--text-muted)',
                     textAlign: 'left'
                   }}>
-                    {sessionData.transcript}
+                    {loadingTranscript ? 'Descargando transcripción...' : transcript}
                   </div>
                 </details>
               )}
