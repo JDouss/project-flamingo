@@ -152,15 +152,20 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, isDemoMode
             const membersList = Object.keys({ ...startGrades, ...endGrades });
             
             // Filter out empty grades
+            const parseGrade = (v) => {
+              if (v === null || v === undefined || v === '') return null;
+              const num = Number(v);
+              return isNaN(num) ? null : num;
+            };
+
             const validMembers = membersList.filter(m => 
-              (startGrades[m] !== undefined && startGrades[m] !== null && startGrades[m] !== '') || 
-              (endGrades[m] !== undefined && endGrades[m] !== null && endGrades[m] !== '')
+              parseGrade(startGrades[m]) !== null || parseGrade(endGrades[m]) !== null
             );
             if (validMembers.length === 0) return null;
 
             // Calculate averages
-            const startValues = validMembers.map(m => startGrades[m]).filter(v => typeof v === 'number');
-            const endValues = validMembers.map(m => endGrades[m]).filter(v => typeof v === 'number');
+            const startValues = validMembers.map(m => parseGrade(startGrades[m])).filter(v => v !== null);
+            const endValues = validMembers.map(m => parseGrade(endGrades[m])).filter(v => v !== null);
             const startAvg = startValues.length ? (startValues.reduce((a, b) => a + b, 0) / startValues.length).toFixed(1) : null;
             const endAvg = endValues.length ? (endValues.reduce((a, b) => a + b, 0) / endValues.length).toFixed(1) : null;
             const delta = (startAvg && endAvg) ? (endAvg - startAvg).toFixed(1) : null;
@@ -220,11 +225,11 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, isDemoMode
                     {/* Bars rendering */}
                     {validMembers.map((m, idx) => {
                       const xBase = 60 + idx * 80;
-                      const sVal = startGrades[m];
-                      const eVal = endGrades[m];
+                      const sVal = parseGrade(startGrades[m]);
+                      const eVal = parseGrade(endGrades[m]);
 
-                      const sHeight = sVal ? sVal * 14 : 0;
-                      const eHeight = eVal ? eVal * 14 : 0;
+                      const sHeight = sVal !== null ? sVal * 14 : 0;
+                      const eHeight = eVal !== null ? eVal * 14 : 0;
 
                       const sY = 170 - sHeight;
                       const eY = 170 - eHeight;
@@ -232,7 +237,7 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, isDemoMode
                       return (
                         <g key={m}>
                           {/* Starting bar */}
-                          {sVal && (
+                          {sVal !== null && (
                             <g>
                               <rect
                                 x={xBase}
@@ -249,7 +254,7 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, isDemoMode
                           )}
 
                           {/* Ending bar */}
-                          {eVal && (
+                          {eVal !== null && (
                             <g>
                               <rect
                                 x={xBase + 24}
@@ -299,9 +304,9 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, isDemoMode
                     </thead>
                     <tbody>
                       {validMembers.map(m => {
-                        const sVal = startGrades[m];
-                        const eVal = endGrades[m];
-                        const diff = (sVal !== undefined && eVal !== undefined) ? (eVal - sVal) : null;
+                        const sVal = parseGrade(startGrades[m]);
+                        const eVal = parseGrade(endGrades[m]);
+                        const diff = (sVal !== null && eVal !== null) ? (eVal - sVal).toFixed(1) : null;
                         return (
                           <tr key={m} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
                             <td style={{ padding: '0.5rem', fontWeight: 'bold' }}>{m}</td>

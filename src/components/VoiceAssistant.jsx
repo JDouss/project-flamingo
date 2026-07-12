@@ -5,7 +5,7 @@ import { collection, addDoc, getDocs, query, orderBy, deleteDoc, doc, setDoc } f
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { renderMarkdown } from '../utils/markdown';
 
-export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMode, bookId, books = [], onApplyNotesToBook }) {
+export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMode, bookId, books = [], onApplyNotesToBook, onCreateBookFromSession }) {
   const [apiKey, setApiKey] = useState(() => {
     return import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY || localStorage.getItem('flamingo_gemini_api_key') || '';
   });
@@ -109,6 +109,13 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
   const [recordCountdown, setRecordCountdown] = useState(10);
   const [recordIntervalId, setRecordIntervalId] = useState(null);
   const [audioChunks, setAudioChunks] = useState([]);
+
+  // Cleanup for recording interval on unmount
+  useEffect(() => {
+    return () => {
+      if (recordIntervalId) clearInterval(recordIntervalId);
+    };
+  }, [recordIntervalId]);
 
   // Fetch History
   const fetchHistory = async () => {
@@ -314,12 +321,12 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
       const hasAudioExt = 
         fileNameLower.endsWith('.mp3') || 
         fileNameLower.endsWith('.wav') || 
-        fileNameLower.endsWith('.m4a') || 
         fileNameLower.endsWith('.ogg') ||
+        fileNameLower.endsWith('.flac') ||
         fileNameLower.endsWith('.webm');
 
       if (!isAudioType && !hasAudioExt) {
-        alert("Por favor, selecciona un archivo de audio válido (.mp3, .wav, .m4a, .ogg o .webm).");
+        alert("Por favor, selecciona un archivo de audio válido (.mp3, .wav, .flac, .ogg o .webm). El formato .m4a no está soportado.");
         return;
       }
       
@@ -489,12 +496,12 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
     const hasAudioExt = 
       fileNameLower.endsWith('.mp3') || 
       fileNameLower.endsWith('.wav') || 
-      fileNameLower.endsWith('.m4a') || 
+      fileNameLower.endsWith('.flac') || 
       fileNameLower.endsWith('.ogg');
 
     if (!isAudioType && !hasAudioExt) {
       console.warn("Rejected file selection (unsupported extension/mime):", file.name, file.type);
-      setErrorMsg('Por favor, sube un archivo de audio válido (.mp3, .wav, .m4a o .ogg).');
+      setErrorMsg('Por favor, sube un archivo de audio válido (.mp3, .wav, .flac o .ogg). El formato .m4a no está soportado.');
       return;
     }
     setAudioFile(file);
@@ -645,13 +652,8 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
             case 'wav':
               encoding = 'LINEAR16';
               break;
-            case 'm4a':
-              // m4a (AAC) is not directly supported by STT v1, 
-              // but we'll try MP3 encoding as closest match
-              encoding = 'MP3';
-              break;
             default:
-              encoding = 'MP3'; // reasonable default for most audio files
+              encoding = 'ENCODING_UNSPECIFIED'; // auto-detect
           }
 
           // Construct GCS URI from the Firebase Storage download URL
@@ -761,6 +763,9 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
           );
 
           if (!sttRes.ok) {
+            if (sttRes.status === 401 && gcpAccessToken) {
+              throw new Error("El token de acceso de Google Cloud ha expirado (Error 401). Por favor, cierra sesión y vuelve a iniciar sesión con Google para renovarlo.");
+            }
             const sttErr = await sttRes.json().catch(() => ({}));
             throw new Error(sttErr?.error?.message || `GCP STT status ${sttRes.status}`);
           }
@@ -790,6 +795,9 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
             }
             const opRes = await fetch(opUrl, { headers: opHeaders });
             if (!opRes.ok) {
+              if (opRes.status === 401 && gcpAccessToken) {
+                throw new Error("El token de acceso de Google Cloud ha expirado (Error 401). Por favor, cierra sesión y vuelve a iniciar sesión con Google para renovarlo.");
+              }
               throw new Error(`Error al verificar operación STT (${opRes.status})`);
             }
             responseData = await opRes.json();
@@ -799,7 +807,7 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
           }
 
           if (!done) {
-            throw new Error("La operación de transcripción de GCP STT expiró.");
+            throw new Error("La operación de transcripción de GCP STT expiró tras 5 minutos de espera.");
           }
 
           if (responseData.error) {
@@ -1043,68 +1051,50 @@ export default function VoiceAssistant({ isOpen, onClose, onApplyNotes, isDemoMo
 
       // 2. Request analysis from Gemini 3.5 Flash using text transcript
       const finalPrompt = `
-Eres un secretario experto y analista de clubes de lectura.
-A continuación se presenta la transcripción completa de la discusión de un club de lectura, donde los diálogos ya están atribuidos a los miembros del club por sus nombres reales.
+Eres un analista literario experto. Analiza la siguiente transcripción de una sesión de debate de un club de lectura, donde las etiquetas de altavoz ya están mapeadas a nombres reales.
 
 Transcripción de la Sesión:
 """
 ${mappedTranscript}
 """
 
-Instrucciones de análisis:
-1. Lee detenidamente la transcripción y extrae los temas clave discutidos, los acuerdos y desacuerdos principales.
-2. Identifica y extrae las calificaciones individuales (de 1 a 10) que cada miembro dio al inicio de la sesión (expectativas o valoración inicial) y al final de la sesión (valoración tras debatir). Busca frases como "Le doy un 7 al empezar", "Le pongo un 8 al final", "Mi nota inicial es 6", "Termino poniéndole un 8", etc. Si un miembro no da explícitamente una nota, intenta deducirla a partir de su nivel de entusiasmo en la transcripción, o devuélvela como null si no hay información alguna.
-3. Para cada miembro del club de lectura que participó en la sesión (los nombres indicados en la transcripción, tales como Jaime, Almu, Alejandro, Joaquin, Zepe):
-   - Genera un resumen de 2 o 3 frases de sus opiniones y contribuciones principales, redactado estrictamente en primera persona singular (ej. "Yo opiné que...", "Pienso que...").
-   - Genera un documento en Markdown estructurado que sirva como sus Notas de la Sesión. El foco debe estar en dicho miembro (es decir, la primera persona "Yo" y "Mi opinión" se refieren a ese miembro en particular; por ejemplo, para Jaime, "Yo" y "Mi opinión" se refieren a Jaime). Organiza el documento estrictamente bajo el siguiente esquema:
-     # Notas de la Sesión - [Nombre del Miembro]
-     
-     ## Temas Debatidos
-     - Extrae los temas principales y subtemas que se han debatido durante la reunión. Resume brevemente qué ángulos se tocaron sobre cada uno y quién los introdujo. Asegúrate de atribuir correctamente cada idea a su speaker en el texto.
-     
-     ## Análisis de Personajes
-     - Lista los personajes de la obra que se han discutido. Resume las diferentes interpretaciones, críticas o defensas que surgieron sobre sus acciones y psicología.
-     
-     ## Desglose de Posturas
-     - Para cada tema y personaje mencionado en las secciones anteriores, haz un contraste explícito bajo el siguiente formato:
-       * **[Nombre del Tema o Personaje]**:
-         - **Mi opinión**: Extrae la postura específica de este miembro en primera persona (ej. "Yo opiné que...", "Mi postura fue..."), detallando sus argumentos e ideas aportadas.
-         - **Ideas generales**: Si el miembro expreso una opinión explícita, resume brevemente la discusión o consenso general. Si en este tema o personaje el miembro NO expresó una opinión explícita, indícalo claramente escribiendo "Sin opinión directa de [Nombre del Miembro]" y proporciona un resumen conciso de las ideas, debates o el consenso general que expresó el resto del grupo sobre ese punto en particular.
+Debes generar EXCLUSIVAMENTE un objeto JSON válido con la estructura solicitada abajo. NO envuelvas la respuesta en \\\`\\\`\\\`json ni incluyas texto fuera del JSON.
 
-     Restricciones de formato para el Markdown de las Notas:
-     - Asegúrate de atribuir correctamente cada idea a su speaker. No mezcles las opiniones de otros miembros con las del miembro propietario de la nota.
-     - Utiliza un formato estructurado en Markdown, con encabezados claros (##) para separar Temas Debatidos, Análisis de Personajes y Desglose de Posturas tal y como se detalla arriba.
-     - Usa viñetas para que la información sea altamente escaneable y directa.
-4. Si hay algún "Invitado", genera lo mismo para él.
-
-Debes devolver tu respuesta estrictamente en formato JSON con la siguiente estructura exacta:
+Estructura JSON Esperada:
 {
-  "generalSummary": "Un resumen general de la sesión, los temas discutidos, conclusiones y dinámica del grupo.",
+  "bookTitle": "Título del libro debatido (deducido del audio, o null si no se puede deducir)",
+  "bookAuthor": "Autor del libro debatido (deducido del audio, o null)",
+  "generalSummary": "Un breve resumen ejecutivo de la sesión (2-3 párrafos) que resuma la dinámica de grupo y el tono general del debate.",
   "grades": {
-    "start": {
-      "Nombre del Miembro": 8,
-      ...
-    },
-    "end": {
-      "Nombre del Miembro": 9,
-      ...
-    }
+    "start": { "NombreMiembro1": 7.5, "NombreMiembro2": 8.0 },
+    "end": { "NombreMiembro1": 8.5, "NombreMiembro2": 8.0 }
   },
-  "speakers": [
-    {
-      "id": "Nombre del Miembro" (ej. "Jaime", "Almu", etc.),
-      "voiceSnippet": "Una cita directa representativa de este hablante de la transcripción.",
-      "summary": "Resumen en primera persona singular...",
-      "notesMarkdown": "Documento Markdown estructurado con el formato y secciones solicitadas..."
-    }
-  ]
+  "sessionSummaryMarkdown": "El documento markdown completo estructurado tal y como se detalla a continuación."
 }
 
-Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente escapado dentro del JSON. Todo el contenido generado DEBE estar en español. No incluyes ningún envoltorio de markdown como \`\`\`json. Devuelve únicamente el JSON crudo.
+Instrucciones para generar "sessionSummaryMarkdown" (debe ser un string con saltos de línea \\n validos para JSON):
+El valor debe ser un documento estructurado en Markdown clásico que contenga EXACTAMENTE las siguientes secciones en este orden:
+
+# Memoria y Resumen del Debate - [Título del Libro]
+
+## Resumen Ejecutivo de la Sesión
+(Detalle del ambiente de la reunión, puntos álgidos de debate y duración implícita).
+
+## Calificaciones y Evolución
+(Análisis cualitativo detallado de cómo y por qué variaron las notas de los miembros de principio a fin del debate. Extrae las notas de 1 a 10 que hayan mencionado).
+
+## Temas Debatidos y Posturas Individuales
+(Desglose exhaustivo tema por tema de lo discutido. Imprescindible: Para cada tema, detallar la opinión concreta y argumentos aportados por CADA miembro en la reunión por su nombre. Indicar el consenso o disenso final del grupo en cada tema).
+
+## Análisis de Personajes y su Psicología
+(Discusión sostenida sobre los personajes principales y su desarrollo en la trama).
+
+## Conclusiones, Puntos de Acuerdo y Citas Destacadas
+(Listado de conclusiones clave acordadas colectivamente y citas destacadas textuales o parafraseadas que resuman el alma de la sesión).
 `;
 
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey.trim()}`,
+        \`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=\${apiKey.trim()}\`,
         {
           method: 'POST',
           headers: {
@@ -1550,7 +1540,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                           Arrastra y suelta la grabación de la reunión aquí, o <span style={{ color: 'var(--primary)' }}>busca un archivo</span>
                         </p>
                         <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          Formatos soportados: MP3, WAV, M4A, OGG
+                          Formatos soportados: MP3, WAV, FLAC, OGG
                         </p>
                       </>
                     )}
@@ -1558,7 +1548,7 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                   <input
                     id="voice-audio-input"
                     type="file"
-                    accept="audio/*,.mp3,.wav,.m4a,.ogg,audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/m4a,audio/x-m4a,audio/ogg"
+                    accept="audio/*,.mp3,.wav,.flac,.ogg,audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/ogg"
                     style={{ display: 'none' }}
                     onChange={handleFileChange}
                   />
@@ -2075,6 +2065,42 @@ Asegúrate de que 'notesMarkdown' sea texto Markdown válido y correctamente esc
                           Aplicar a Reseña
                         </button>
                       </div>
+                      
+                      {onCreateBookFromSession && (
+                        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ flex: 1, padding: '0.5rem 1.25rem', height: 'auto', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            onClick={async () => {
+                              try {
+                                const markdown = analysisResult.sessionSummaryMarkdown || analysisResult.result?.sessionSummaryMarkdown || '';
+                                const grades = analysisResult.grades || analysisResult.result?.grades || null;
+                                const genSummary = analysisResult.generalSummary || analysisResult.result?.generalSummary || null;
+                                const title = analysisResult.bookTitle || analysisResult.result?.bookTitle || 'Nueva Reseña de Sesión';
+                                const author = analysisResult.bookAuthor || analysisResult.result?.bookAuthor || 'Autor Desconocido';
+                                
+                                // We saved it to history, find the most recent one or match by audioUrl
+                                let transcriptionId = null;
+                                if (history && history.length > 0) {
+                                  // The newly saved one is at the top of the history list if it was just saved
+                                  const match = history.find(h => h.audioUrl === uploadedAudioUrl || h.audioName === audioFile?.name);
+                                  if (match) transcriptionId = match.id;
+                                }
+                                
+                                await onCreateBookFromSession(title, author, 'Debate', markdown, grades, genSummary, transcriptionId);
+                                alert("Nueva reseña creada con éxito a partir de la sesión.");
+                                onClose();
+                              } catch (err) {
+                                alert("Error al crear la reseña: " + err.message);
+                              }
+                            }}
+                          >
+                            <Sparkles size={14} style={{ marginRight: '0.35rem' }} />
+                            Crear Nueva Reseña Automáticamente
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 

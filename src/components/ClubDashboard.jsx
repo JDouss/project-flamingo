@@ -10,8 +10,13 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
     return books
       .filter(b => {
         if (b.status !== 'completed' || !b.grades) return false;
-        const startVals = Object.values(b.grades.start || {}).filter(v => typeof v === 'number' && !isNaN(v));
-        const endVals = Object.values(b.grades.end || {}).filter(v => typeof v === 'number' && !isNaN(v));
+        const parseGrade = (v) => {
+          if (v === null || v === undefined || v === '') return null;
+          const num = Number(v);
+          return isNaN(num) ? null : num;
+        };
+        const startVals = Object.values(b.grades.start || {}).map(parseGrade).filter(v => v !== null);
+        const endVals = Object.values(b.grades.end || {}).map(parseGrade).filter(v => v !== null);
         return startVals.length > 0 || endVals.length > 0;
       })
       .sort((a, b) => new Date(a.endDate || a.createdAt) - new Date(b.endDate || b.createdAt));
@@ -28,6 +33,12 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
 
     const memberStats = {}; // { Jaime: { startSum: 0, startCount: 0, endSum: 0, endCount: 0 } }
 
+    const parseGrade = (v) => {
+      if (v === null || v === undefined || v === '') return null;
+      const num = Number(v);
+      return isNaN(num) ? null : num;
+    };
+
     gradedBooks.forEach(b => {
       const start = b.grades.start || {};
       const end = b.grades.end || {};
@@ -37,16 +48,16 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
           memberStats[m] = { startSum: 0, startCount: 0, endSum: 0, endCount: 0 };
         }
 
-        const startVal = start[m];
-        if (typeof startVal === 'number') {
+        const startVal = parseGrade(start[m]);
+        if (startVal !== null) {
           totalStartSum += startVal;
           totalStartCount++;
           memberStats[m].startSum += startVal;
           memberStats[m].startCount++;
         }
 
-        const endVal = end[m];
-        if (typeof endVal === 'number') {
+        const endVal = parseGrade(end[m]);
+        if (endVal !== null) {
           totalEndSum += endVal;
           totalEndCount++;
           memberStats[m].endSum += endVal;
@@ -85,7 +96,7 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
 
     // Find best book
     const bestBook = [...gradedBooks].map(b => {
-      const vals = Object.values(b.grades.end || {}).filter(v => typeof v === 'number');
+      const vals = Object.values(b.grades.end || {}).map(parseGrade).filter(v => v !== null);
       const avg = vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : 0;
       return { book: b, avg };
     }).sort((a, b) => b.avg - a.avg)[0];
@@ -105,9 +116,15 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
   const sortedTableBooks = useMemo(() => {
     if (!stats) return [];
     
+    const parseGrade = (v) => {
+      if (v === null || v === undefined || v === '') return null;
+      const num = Number(v);
+      return isNaN(num) ? null : num;
+    };
+
     const mapped = gradedBooks.map(b => {
-      const startVals = Object.values(b.grades.start || {}).filter(v => typeof v === 'number');
-      const endVals = Object.values(b.grades.end || {}).filter(v => typeof v === 'number');
+      const startVals = Object.values(b.grades.start || {}).map(parseGrade).filter(v => v !== null);
+      const endVals = Object.values(b.grades.end || {}).map(parseGrade).filter(v => v !== null);
       const startAvg = startVals.length ? (startVals.reduce((a, b) => a + b, 0) / startVals.length) : 0;
       const endAvg = endVals.length ? (endVals.reduce((a, b) => a + b, 0) / endVals.length) : 0;
       return {
@@ -257,11 +274,17 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
 
                     {/* Construct paths for lines */}
                     {(() => {
+                      const parseGrade = (v) => {
+                        if (v === null || v === undefined || v === '') return null;
+                        const num = Number(v);
+                        return isNaN(num) ? null : num;
+                      };
+
                       const points = gradedBooks.map((b, idx) => {
                         const x = 60 + idx * (gradedBooks.length > 1 ? (540 / (gradedBooks.length - 1)) : 540);
                         
-                        const startVals = Object.values(b.grades.start || {}).filter(v => typeof v === 'number');
-                        const endVals = Object.values(b.grades.end || {}).filter(v => typeof v === 'number');
+                        const startVals = Object.values(b.grades.start || {}).map(parseGrade).filter(v => v !== null);
+                        const endVals = Object.values(b.grades.end || {}).map(parseGrade).filter(v => v !== null);
                         const startAvg = startVals.length ? startVals.reduce((x, y) => x + y, 0) / startVals.length : 0;
                         const endAvg = endVals.length ? endVals.reduce((x, y) => x + y, 0) / endVals.length : 0;
                         
