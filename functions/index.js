@@ -187,14 +187,14 @@ function buildTranscriptionPrompt(memberCount) {
   return `Transcribe íntegramente esta grabación de una sesión de un club de lectura en español.
 
 Reglas ESTRICTAS de diarización:
-- Formato de cada intervención: [Speaker N]: texto (una línea por turno de palabra).
+- Cada intervención empieza en su propia línea con la etiqueta EXACTA "[Speaker N]:" (corchetes incluidos, la palabra inglesa "Speaker", número, dos puntos). NO la traduzcas a "Hablante"; NO uses markdown (nada de ** o _); NO añadas marcas de tiempo. Ejemplo literal: [Speaker 1]: Hola a todos.
 - Numera las voces por orden de primera aparición: [Speaker 1], [Speaker 2], ...
 - El club suele tener ${memberCount || 5} miembros, pero usa exactamente tantas etiquetas como voces DISTINTAS oigas realmente; no fuerces el número.
 - Sé consistente: la misma voz debe llevar SIEMPRE la misma etiqueta durante toda la grabación. Presta atención al timbre, no al tema.
 - NO uses nombres propios en las etiquetas aunque los oigas; siempre [Speaker N].
 - No resumas ni omitas nada; transcripción literal con puntuación correcta.
 
-Devuelve ÚNICAMENTE la transcripción, sin comentarios adicionales.`;
+Devuelve ÚNICAMENTE la transcripción, empezando directamente por "[Speaker 1]:", sin ningún texto introductorio.`;
 }
 
 const SUGGESTION_SCHEMA = {
@@ -234,25 +234,47 @@ ${transcript}
 """`;
 }
 
-// Parse "[Speaker N]: text" lines into speaker list + first snippet each.
-function extractSpeakers(transcript) {
+// Detects a diarized turn at the start of a line, tolerating the ways an LLM
+// tends to drift from the requested "[Speaker N]:" format: missing brackets,
+// markdown bold, Spanish label words, a leading bullet, and an inline
+// timestamp. Capture group 1 = speaker number, group 2 = the spoken text.
+const SPEAKER_LINE =
+  /^\s*(?:[-*>]\s*)?\*{0,2}_{0,2}\[?\s*(?:speaker|hablante|interlocutor|orador|participante|persona|voz)\s*(\d+)\s*\]?_{0,2}\*{0,2}\s*(?:\([^)]*\)|\[[^\]]*\])?\s*[:\.\-–—)]\s*(.*)$/i;
+
+// Parse a raw transcript into a canonical "[Speaker N]: text" transcript plus
+// the ordered speaker list and a first snippet per speaker. Continuation
+// lines (a turn wrapping without a fresh tag) are appended to the current
+// speaker so no dialogue is lost. Preamble before the first tag is dropped.
+function parseTranscript(raw) {
+  const entries = [];
+  for (const line of raw.split("\n")) {
+    const m = line.match(SPEAKER_LINE);
+    if (m) {
+      // Strip any leading markdown residue (e.g. a trailing "**" from a bold tag).
+      const text = m[2].replace(/^[*_\s]+/, "").trim();
+      entries.push({ num: m[1], text });
+    } else if (entries.length > 0) {
+      const cont = line.trim();
+      if (cont) entries[entries.length - 1].text += " " + cont;
+    }
+  }
+
   const speakers = [];
   const snippets = {};
-  for (const line of transcript.split("\n")) {
-    const m = line.match(/^\[Speaker\s+(\d+)\]:\s*(.*)$/i);
-    if (!m) continue;
-    const tag = `Speaker ${m[1]}`;
+  for (const e of entries) {
+    const tag = `Speaker ${e.num}`;
     if (!speakers.includes(tag)) speakers.push(tag);
-    const text = m[2].trim();
-    if (!snippets[tag] && text.length > 15) {
-      snippets[tag] = text.length > 140 ? text.slice(0, 140) + "…" : text;
+    if ((!snippets[tag] || snippets[tag].length < 20) && e.text.length > 15) {
+      snippets[tag] = e.text.length > 140 ? e.text.slice(0, 140) + "…" : e.text;
     }
   }
   speakers.sort((a, b) => Number(a.replace(/\D/g, "")) - Number(b.replace(/\D/g, "")));
   for (const tag of speakers) {
     if (!snippets[tag]) snippets[tag] = "Intervención breve.";
   }
-  return { speakers, snippets };
+
+  const canonical = entries.map((e) => `[Speaker ${e.num}]: ${e.text}`).join("\n");
+  return { speakers, snippets, canonical };
 }
 
 export const transcribeSession = onCall(CALL_OPTS, async (request) => {
@@ -291,7 +313,7 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
     const members = membersSnap.docs.map((d) => d.data());
 
     logger.info(`Session ${ref.id}: transcribing`);
-    const transcript = await generateContent(
+    const rawTranscript = await generateContent(
       [
         { file_data: { file_uri: geminiFile.uri, mime_type: mimeType } },
         { text: buildTranscriptionPrompt(members.length) },
@@ -299,17 +321,27 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
       apiKey
     );
 
-    const { speakers, snippets } = extractSpeakers(transcript);
+    // Normalize to a canonical "[Speaker N]:" transcript so every downstream
+    // step (snippets, mapping replacement, analysis) works regardless of how
+    // the model formatted its labels.
+    const { speakers, snippets, canonical } = parseTranscript(rawTranscript);
     if (speakers.length === 0) {
-      throw new Error("La transcripción no contiene etiquetas [Speaker N] reconocibles.");
+      logger.error(
+        `Session ${ref.id}: no speaker tags recognized. Raw transcript starts:\n` +
+          rawTranscript.slice(0, 800)
+      );
+      throw new Error(
+        "La transcripción se generó pero no se reconocieron etiquetas de hablante. Revisa los logs de la función para ver el formato devuelto por el modelo."
+      );
     }
+    logger.info(`Session ${ref.id}: recognized ${speakers.length} speakers (${speakers.join(", ")})`);
 
     // Suggested mapping (hint only — a human confirms it in the SPA).
     let suggestedMapping = {};
     try {
       logger.info(`Session ${ref.id}: suggesting speaker mapping`);
       const suggestionRaw = await generateContent(
-        [{ text: buildSuggestionPrompt(transcript, members) }],
+        [{ text: buildSuggestionPrompt(canonical, members) }],
         apiKey,
         { responseMimeType: "application/json", responseSchema: SUGGESTION_SCHEMA }
       );
@@ -329,14 +361,14 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
     }
 
     const transcriptPath = `transcripts/${ref.id}.txt`;
-    await bucket.file(transcriptPath).save(transcript, {
+    await bucket.file(transcriptPath).save(canonical, {
       contentType: "text/plain; charset=utf-8",
     });
 
     await ref.update({
       status: "needs_mapping",
       transcriptPath,
-      transcriptExcerpt: transcript.slice(0, 1500),
+      transcriptExcerpt: canonical.slice(0, 1500),
       detectedSpeakers: speakers,
       speakerSnippets: snippets,
       suggestedMapping,
