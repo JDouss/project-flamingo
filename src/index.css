@@ -161,20 +161,39 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .logo {
-  font-family: var(--font-display);
-  font-size: 1.6rem;
-  font-weight: 800;
   color: var(--text-primary);
   text-decoration: none;
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  letter-spacing: -0.03em;
+  gap: 0.7rem;
 }
 
-.logo span {
-  font-style: normal;
-  font-weight: 400;
+.logo-lockup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.logo-eyebrow {
+  font-family: var(--font-sans);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.logo-title {
+  font-family: var(--font-serif);
+  font-size: 1.45rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+}
+
+.logo-title em {
+  font-style: italic;
+  font-weight: 500;
   color: var(--primary-ink);
 }
 
@@ -193,6 +212,11 @@ h1, h2, h3, h4, h5, h6 {
   border-color: rgba(255, 26, 117, 0.35);
   box-shadow: var(--shadow-md);
   transform: translateY(-4px);
+}
+
+/* Picking a book off the shelf: lift with the faintest tilt. */
+.book-card.glass-card:hover {
+  transform: translateY(-6px) rotate(-0.5deg);
 }
 
 /* Book Grid Layout */
@@ -221,6 +245,38 @@ h1, h2, h3, h4, h5, h6 {
   background: var(--bg-secondary);
   overflow: hidden;
   border-bottom: 1px solid var(--border);
+}
+
+/* Physical-book cues on covers: a spine crease down the left edge and a
+   stack of page edges peeking on the right. */
+.book-cover-container::after,
+.book-object::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 14px;
+  background: linear-gradient(90deg, rgba(42, 26, 46, 0.28), rgba(42, 26, 46, 0.07) 55%, transparent);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.book-cover-container::before,
+.book-object::before {
+  content: '';
+  position: absolute;
+  top: 2%;
+  bottom: 2%;
+  right: 0;
+  width: 7px;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.55) 0 1px,
+    rgba(42, 26, 46, 0.16) 1px 2.4px
+  );
+  pointer-events: none;
+  z-index: 2;
 }
 
 .book-cover-img {
@@ -442,14 +498,24 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* Wrapper that turns a flat cover image into a book object (spine + pages
+   via the shared ::before/::after rules above). */
+.book-object {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  height: fit-content;
+}
+
 .details-cover {
   width: 100%;
   aspect-ratio: 5/7;
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
   object-fit: cover;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
+  display: block;
 }
 
 .details-header-info {
@@ -546,8 +612,26 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 0.5rem;
+  position: relative;
+  padding-bottom: 0.6rem;
+}
+
+/* Two-tone editorial rule: a short ink-pink dash, then a hairline. */
+.section-title::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--primary-ink) 0,
+    var(--primary-ink) 2.75rem,
+    transparent 2.75rem,
+    transparent calc(2.75rem + 6px),
+    var(--border) calc(2.75rem + 6px)
+  );
 }
 
 /* Reviews and text formatting */
@@ -557,6 +641,17 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--text-primary);
   white-space: pre-wrap;
   font-family: var(--font-sans);
+}
+
+/* Classic drop cap on the review — the most book of all book details. */
+.review-text::first-letter {
+  font-family: var(--font-serif);
+  font-size: 3.3em;
+  font-weight: 600;
+  float: left;
+  line-height: 0.82;
+  padding: 0.06em 0.12em 0 0;
+  color: var(--primary-ink);
 }
 
 /* Quotes Carousel — editorial pull-quote */
@@ -1482,4 +1577,19 @@ h1, h2, h3, h4, h5, h6 {
 .voice-tab-btn.active {
   color: var(--primary-ink);
   border-bottom-color: var(--primary);
+}
+
+/* Site footer: a little bookshelf resting above the colophon line. */
+.site-footer {
+  margin-top: 6rem;
+  padding: 2.5rem 1.5rem 3rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
 }

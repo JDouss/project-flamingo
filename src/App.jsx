@@ -18,6 +18,7 @@ import BookDetails from './features/book-details/BookDetails';
 import AdminPanel from './features/admin/AdminPanel';
 import LoginModal from './features/admin/LoginModal';
 import FlamingoIcon from './ui/FlamingoIcon';
+import { OpenBook, Bookshelf } from './ui/ornaments';
 import SessionStudio from './features/session-studio/SessionStudio';
 import ClubDashboard from './features/dashboard/ClubDashboard';
 import { useBooks } from './data/useBooks';
@@ -125,8 +126,11 @@ export default function App() {
       <header className="header-wrapper">
         <div className="header-content">
           <a href="#" className="logo" style={{ transition: 'opacity 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.opacity = '0.8'} onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}>
-            <FlamingoIcon size={28} />
-            <span>Reseñas<span style={{ fontWeight: '300', opacity: 0.8 }}> Flamingueras</span></span>
+            <FlamingoIcon size={32} />
+            <span className="logo-lockup">
+              <span className="logo-eyebrow">Club de lectura · Flamingo Rock</span>
+              <span className="logo-title">Reseñas <em>Flamingueras</em></span>
+            </span>
           </a>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -247,8 +251,8 @@ export default function App() {
             border: '1px dashed rgba(42, 26, 46, 0.14)',
             borderRadius: 'var(--radius-md)'
           }}>
-            <BookOpen size={48} style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', opacity: 0.3 }} />
-            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', fontWeight: '700' }}>No se encontraron reseñas</h3>
+            <OpenBook size={84} style={{ color: 'var(--primary-ink)', marginBottom: '1.5rem', opacity: 0.55 }} />
+            <h3 className="serif-title" style={{ fontSize: '1.35rem', marginBottom: '0.5rem', fontWeight: '600' }}>No se encontraron reseñas</h3>
             <p style={{ color: 'var(--text-muted)', maxWidth: '400px', margin: '0 auto', fontSize: '0.9rem' }}>
               No pudimos encontrar ningún libro que coincida con tus criterios de búsqueda. Intenta ajustar el texto o los filtros.
             </p>
@@ -257,16 +261,9 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer style={{
-        marginTop: '6rem',
-        padding: '3rem 1.5rem',
-        borderTop: '1px solid var(--border)',
-        background: 'var(--bg-secondary)',
-        textAlign: 'center',
-        fontSize: '0.85rem',
-        color: 'var(--text-muted)'
-      }}>
-        <p>© 2026 Reseñas de Libros Project Flamingo. Creado con Vite, React y GCP.</p>
+      <footer className="site-footer">
+        <Bookshelf style={{ color: 'var(--text-muted)' }} />
+        <p>© 2026 Reseñas Flamingueras · Club de lectura Flamingo Rock</p>
       </footer>
 
       {/* Overlays / Modals */}

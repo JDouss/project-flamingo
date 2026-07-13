@@ -76,7 +76,9 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
 
         {/* Hero Section */}
         <div className="details-hero">
-          <img src={imageUrl} alt={title} className="details-cover" />
+          <div className="book-object">
+            <img src={imageUrl} alt={title} className="details-cover" />
+          </div>
           <div className="details-header-info">
             <div className="details-tags">
               <span className="tag" style={{ background: 'var(--primary-glow)', color: 'var(--primary)', borderColor: 'var(--primary)' }}>
