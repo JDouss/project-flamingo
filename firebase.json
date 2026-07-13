@@ -17,6 +17,7 @@
     "rules": "firestore.rules"
   },
   "storage": {
+    "bucket": "project-flamingo-497112.firebasestorage.app",
     "rules": "storage.rules"
   },
   "functions": [

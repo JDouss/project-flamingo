@@ -23,7 +23,7 @@ firebase functions:secrets:set GEMINI_API_KEY
 
 ```powershell
 cd functions; npm install; cd ..
-firebase deploy --only firestore:rules,storage:rules
+firebase deploy --only firestore:rules,storage
 firebase deploy --only functions
 npm run build
 firebase deploy --only hosting
