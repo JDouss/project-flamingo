@@ -197,21 +197,20 @@ async function generateContent(parts, apiKey, generationConfig = {}) {
 // separately; each request then contains only ~30 min of audio.
 const CHUNK_SECONDS = 1800; // 30-minute segments
 
-function buildSegmentPrompt(memberCount, roster, segmentIndex, segmentCount) {
-  const rosterText = roster.length
-    ? `Voces ya identificadas en fragmentos anteriores (reutiliza EXACTAMENTE el mismo número para la misma voz; añade un número nuevo SOLO si aparece una voz nueva que no esté en esta lista):\n${roster
-        .map((r) => `- [Speaker ${r.num}]: «${r.snippet}»`)
-        .join("\n")}`
-    : "Es el primer fragmento; numera las voces por orden de aparición empezando en [Speaker 1].";
-
+function buildSegmentPrompt(memberCount, segmentIndex, segmentCount) {
   return `Este es el fragmento ${segmentIndex + 1} de ${segmentCount} de la grabación de una sesión de un club de lectura en español. Transcríbelo ÍNTEGRAMENTE y de forma literal.
 
-Formato: cada intervención en su propia línea con la etiqueta EXACTA "[Speaker N]:" (corchetes, palabra inglesa Speaker, número, dos puntos). Sin markdown, sin marcas de tiempo, sin nombres propios.
+Formato de cada intervención (una línea por turno de palabra):
+[mm:ss] [Speaker N]: texto
+donde mm:ss es el minuto y segundo DENTRO DE ESTE FRAGMENTO en que empieza el turno.
 
-El club suele tener ${memberCount || 5} miembros.
-${rosterText}
+Reglas de diarización:
+- Numera las voces de este fragmento por orden de aparición: [Speaker 1], [Speaker 2], ...
+- En la sala suele haber ${memberCount || 5} personas. NO crees una etiqueta nueva salvo que oigas una voz CLARAMENTE distinta; ante la duda, reutiliza la etiqueta existente más parecida.
+- La misma voz debe llevar SIEMPRE la misma etiqueta durante todo el fragmento (fíjate en el timbre, no en el tema).
+- Sin markdown, sin nombres propios en las etiquetas.
 
-Devuelve ÚNICAMENTE la transcripción de este fragmento, empezando directamente por una etiqueta [Speaker N]:.`;
+Devuelve ÚNICAMENTE la transcripción, empezando directamente por la primera intervención.`;
 }
 
 async function generateChunkWithRetry(parts, apiKey, tries = 3) {
@@ -266,9 +265,12 @@ async function splitAudio(buffer, ext) {
   }
 }
 
-// Transcribe the whole recording segment by segment, returning the raw
-// concatenated transcript. `onProgress(note)` keeps the session lock fresh.
-// Returns null if the audio could not be split (caller falls back).
+// Transcribe the whole recording segment by segment. Each segment uses its
+// own LOCAL speaker numbering — carrying voice identity across separate API
+// calls via text hints is unreliable (a model cannot match a voice it hears
+// now to a quote from another call), so unification happens afterwards in a
+// dedicated text-based consolidation pass. Returns the parsed turn entries
+// ({label, t, text}), or null if the audio could not be split.
 async function transcribeInSegments(buffer, ext, mimeType, apiKey, memberCount, onProgress) {
   let split;
   try {
@@ -281,8 +283,7 @@ async function transcribeInSegments(buffer, ext, mimeType, apiKey, memberCount, 
   try {
     const total = split.segments.length;
     logger.info(`Split audio into ${total} segment(s).`);
-    const parts = [];
-    const roster = [];
+    const entries = [];
 
     for (let i = 0; i < total; i++) {
       if (onProgress) await onProgress(`fragmento ${i + 1}/${total}`);
@@ -291,28 +292,26 @@ async function transcribeInSegments(buffer, ext, mimeType, apiKey, memberCount, 
         const raw = await generateChunkWithRetry(
           [
             { file_data: { file_uri: geminiFile.uri, mime_type: mimeType } },
-            { text: buildSegmentPrompt(memberCount, roster, i, total) },
+            { text: buildSegmentPrompt(memberCount, i, total) },
           ],
           apiKey
         );
-        const parsed = parseTranscript(raw);
-        if (parsed.speakers.length > 0) {
-          parts.push(parsed.canonical);
-          for (const tag of parsed.speakers) {
-            const num = tag.replace(/\D/g, "");
-            if (!roster.some((r) => r.num === num)) {
-              roster.push({ num, snippet: parsed.snippets[tag] });
-            }
+        const segEntries = parseSegment(raw, i);
+        if (segEntries.length === 0) {
+          logger.warn(`Segment ${i + 1}/${total} produced no speaker tags; raw starts: ${raw.slice(0, 300)}`);
+          if (i === 0) {
+            throw new Error(
+              "La transcripción se generó pero no se reconocieron etiquetas de hablante en el primer fragmento. Revisa los logs de la función."
+            );
           }
-        } else {
-          logger.warn(`Segment ${i + 1}/${total} produced no speaker tags; raw starts: ${raw.slice(0, 200)}`);
         }
+        entries.push(...segEntries);
       } finally {
         deleteGeminiFile(geminiFile.name, apiKey);
       }
     }
 
-    return parts.join("\n");
+    return entries;
   } finally {
     await split.cleanup();
   }
@@ -356,46 +355,191 @@ ${transcript}
 }
 
 // Detects a diarized turn at the start of a line, tolerating the ways an LLM
-// tends to drift from the requested "[Speaker N]:" format: missing brackets,
-// markdown bold, Spanish label words, a leading bullet, and an inline
-// timestamp. Capture group 1 = speaker number, group 2 = the spoken text.
-const SPEAKER_LINE =
-  /^\s*(?:[-*>]\s*)?\*{0,2}_{0,2}\[?\s*(?:speaker|hablante|interlocutor|orador|participante|persona|voz)\s*(\d+)\s*\]?_{0,2}\*{0,2}\s*(?:\([^)]*\)|\[[^\]]*\])?\s*[:\.\-–—)]\s*(.*)$/i;
+// tends to drift from the requested "[mm:ss] [Speaker N]:" format: missing
+// brackets, markdown bold, Spanish label words, a leading bullet, and the
+// timestamp before OR after the speaker tag (or absent).
+// Groups: 1-3 leading timestamp, 4 speaker number, 5-7 trailing timestamp,
+// 8 spoken text.
+const TS_PART = String.raw`\[?\(?(\d{1,2}):(\d{2})(?::(\d{2}))?\)?\]?`;
+const SPEAKER_LINE = new RegExp(
+  String.raw`^\s*(?:[-*>]\s*)?(?:${TS_PART}\s*)?` +
+    String.raw`\*{0,2}_{0,2}\[?\s*(?:speaker|hablante|interlocutor|orador|participante|persona|voz)\s*(\d+)\s*\]?_{0,2}\*{0,2}` +
+    String.raw`\s*(?:${TS_PART})?` +
+    String.raw`\s*[:\.\-–—)]\s*(.*)$`,
+  "i"
+);
 
-// Parse a raw transcript into a canonical "[Speaker N]: text" transcript plus
-// the ordered speaker list and a first snippet per speaker. Continuation
-// lines (a turn wrapping without a fresh tag) are appended to the current
-// speaker so no dialogue is lost. Preamble before the first tag is dropped.
-function parseTranscript(raw) {
+function tsToSeconds(a, b, c) {
+  if (a === undefined) return null;
+  // Two components = mm:ss (segments are 30 min); three = hh:mm:ss.
+  return c !== undefined
+    ? Number(a) * 3600 + Number(b) * 60 + Number(c)
+    : Number(a) * 60 + Number(b);
+}
+
+function fmtTime(totalSec) {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = Math.floor(totalSec % 60);
+  return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
+// Parse one segment's raw transcript into turn entries with segment-local
+// voice labels ("F2-S1" = fragment 2, its Speaker 1) and ABSOLUTE seconds
+// (segment offset + in-segment timestamp; null if the model omitted it).
+// Continuation lines are appended to the current turn so no dialogue is lost.
+function parseSegment(raw, segIndex) {
   const entries = [];
   for (const line of raw.split("\n")) {
     const m = line.match(SPEAKER_LINE);
     if (m) {
-      // Strip any leading markdown residue (e.g. a trailing "**" from a bold tag).
-      const text = m[2].replace(/^[*_\s]+/, "").trim();
-      entries.push({ num: m[1], text });
+      const rel = tsToSeconds(m[1], m[2], m[3]) ?? tsToSeconds(m[5], m[6], m[7]);
+      const text = m[8].replace(/^[*_\s]+/, "").trim();
+      entries.push({
+        label: `F${segIndex + 1}-S${m[4]}`,
+        t: rel === null ? null : segIndex * CHUNK_SECONDS + rel,
+        text,
+      });
     } else if (entries.length > 0) {
       const cont = line.trim();
       if (cont) entries[entries.length - 1].text += " " + cont;
     }
   }
+  return entries;
+}
 
-  const speakers = [];
-  const snippets = {};
-  for (const e of entries) {
-    const tag = `Speaker ${e.num}`;
-    if (!speakers.includes(tag)) speakers.push(tag);
-    if ((!snippets[tag] || snippets[tag].length < 20) && e.text.length > 15) {
-      snippets[tag] = e.text.length > 140 ? e.text.slice(0, 140) + "…" : e.text;
+// ---------------------------------------------------------------------------
+// Voice consolidation: merge segment-local voices into global speakers
+// ---------------------------------------------------------------------------
+
+const CONSOLIDATION_SCHEMA = {
+  type: "object",
+  properties: {
+    clusters: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          voices: { type: "array", items: { type: "string" } },
+          rationale: { type: "string" },
+        },
+        required: ["voices"],
+      },
+    },
+  },
+  required: ["clusters"],
+};
+
+function buildConsolidationPrompt(transcript, labels, memberCount) {
+  return `La siguiente transcripción de una sesión de un club de lectura se generó por fragmentos de audio independientes. Cada etiqueta de voz es LOCAL a su fragmento (F2-S1 = fragmento 2, su hablante 1), así que la misma persona real aparece con etiquetas distintas en fragmentos distintos, y a veces una voz se dividió en dos etiquetas dentro del mismo fragmento.
+
+Tu tarea: agrupa las etiquetas que correspondan a la MISMA persona real.
+
+Pistas que debes usar:
+- Continuidad de la conversación en las fronteras entre fragmentos (quien hablaba al final de un fragmento suele seguir al principio del siguiente).
+- Cómo se llaman entre ellos y autorreferencias ("como decía antes yo...").
+- Estilo de análisis, opiniones sostenidas y muletillas de cada persona.
+
+Reglas:
+- En la sala suele haber ${memberCount || 5} personas; el número de grupos debe rondar esa cifra (nunca puede haber más grupos que personas plausibles, pero fusiona SOLO con evidencia).
+- Cada etiqueta debe aparecer en EXACTAMENTE un grupo. Etiquetas: ${labels.join(", ")}.
+
+Transcripción:
+"""
+${transcript}
+"""`;
+}
+
+// Returns a Map label -> global speaker number (1..K, ordered by first
+// appearance). Falls back to one-group-per-label if the pass fails.
+async function consolidateVoices(entries, memberCount, apiKey) {
+  const labels = [...new Set(entries.map((e) => e.label))];
+  const identity = () => new Map(labels.map((l, i) => [l, i + 1]));
+  if (labels.length <= 1) return identity();
+
+  const firstIdx = new Map();
+  entries.forEach((e, i) => {
+    if (!firstIdx.has(e.label)) firstIdx.set(e.label, i);
+  });
+
+  try {
+    let text = entries.map((e) => `[${e.label}]: ${e.text}`).join("\n");
+    if (text.length > 300000) text = text.slice(0, 300000);
+    const raw = await generateContent(
+      [{ text: buildConsolidationPrompt(text, labels, memberCount) }],
+      apiKey,
+      { responseMimeType: "application/json", responseSchema: CONSOLIDATION_SCHEMA }
+    );
+    const { clusters } = JSON.parse(raw);
+
+    const groups = (clusters || [])
+      .map((c) => (c.voices || []).filter((v) => labels.includes(v)))
+      .filter((g) => g.length > 0);
+    groups.sort(
+      (g1, g2) =>
+        Math.min(...g1.map((v) => firstIdx.get(v))) - Math.min(...g2.map((v) => firstIdx.get(v)))
+    );
+
+    const map = new Map();
+    let k = 0;
+    for (const g of groups) {
+      k += 1;
+      for (const v of g) if (!map.has(v)) map.set(v, k);
     }
+    for (const l of labels) if (!map.has(l)) map.set(l, ++k);
+    logger.info(`Consolidated ${labels.length} local voices into ${k} speakers.`);
+    return map;
+  } catch (err) {
+    logger.warn(`Voice consolidation failed (${err.message}); keeping per-segment voices.`);
+    return identity();
   }
-  speakers.sort((a, b) => Number(a.replace(/\D/g, "")) - Number(b.replace(/\D/g, "")));
-  for (const tag of speakers) {
-    if (!snippets[tag]) snippets[tag] = "Intervención breve.";
+}
+
+// Per-speaker evidence for the human mapping step: participation stats and
+// up to 3 long excerpts spread across the session, each with its timestamp
+// so the UI can seek the audio player to that exact moment.
+function buildSpeakerEvidence(entries) {
+  const byNum = new Map();
+  let totalWords = 0;
+  entries.forEach((e, idx) => {
+    const words = e.text.split(/\s+/).filter(Boolean).length;
+    totalWords += words;
+    if (!byNum.has(e.num)) byNum.set(e.num, []);
+    byNum.get(e.num).push({ ...e, words, idx });
+  });
+
+  const speakers = [...byNum.keys()].sort((a, b) => a - b).map((n) => `Speaker ${n}`);
+  const stats = {};
+  const excerpts = {};
+  const snippets = {};
+
+  for (const [num, turns] of byNum) {
+    const tag = `Speaker ${num}`;
+    const words = turns.reduce((s, t) => s + t.words, 0);
+    stats[tag] = {
+      turns: turns.length,
+      wordShare: totalWords ? Math.round((words / totalWords) * 100) : 0,
+    };
+
+    // Longest turns, at least ~5 minutes apart so they sample different
+    // moments of the session (fall back to turn index when no timestamp).
+    const pos = (t) => (t.t !== null && t.t !== undefined ? t.t : t.idx * 30);
+    const picked = [];
+    for (const turn of [...turns].sort((a, b) => b.words - a.words)) {
+      if (picked.length >= 3) break;
+      if (picked.some((p) => Math.abs(pos(p) - pos(turn)) < 300)) continue;
+      picked.push(turn);
+    }
+    picked.sort((a, b) => pos(a) - pos(b));
+
+    excerpts[tag] = picked.map((p) => ({
+      t: p.t ?? null,
+      text: p.text.length > 280 ? p.text.slice(0, 280) + "…" : p.text,
+    }));
+    snippets[tag] = excerpts[tag][0]?.text || "Intervención breve.";
   }
 
-  const canonical = entries.map((e) => `[Speaker ${e.num}]: ${e.text}`).join("\n");
-  return { speakers, snippets, canonical };
+  return { speakers, stats, excerpts, snippets };
 }
 
 export const transcribeSession = onCall(CALL_OPTS, async (request) => {
@@ -433,39 +577,48 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
       ref.update({ status: "transcribing", progressNote: note, updatedAt: new Date().toISOString() });
 
     logger.info(`Session ${ref.id}: transcribing (${buffer.length} bytes) by segments`);
-    let rawTranscript = await transcribeInSegments(buffer, ext, mimeType, apiKey, members.length, touchLock);
+    let entries = await transcribeInSegments(buffer, ext, mimeType, apiKey, members.length, touchLock);
 
     // Fallback: ffmpeg unavailable/failed — transcribe the whole file in one
     // call (works for short recordings; long ones may hit MALFORMED_RESPONSE).
-    if (rawTranscript === null) {
+    if (entries === null) {
       logger.info(`Session ${ref.id}: single-file transcription fallback`);
       const geminiFile = await uploadToGeminiFiles(buffer, mimeType, data.audioName || "session-audio", apiKey);
       try {
-        rawTranscript = await generateChunkWithRetry(
+        const raw = await generateChunkWithRetry(
           [
             { file_data: { file_uri: geminiFile.uri, mime_type: mimeType } },
-            { text: buildSegmentPrompt(members.length, [], 0, 1) },
+            { text: buildSegmentPrompt(members.length, 0, 1) },
           ],
           apiKey
         );
+        entries = parseSegment(raw, 0);
+        if (entries.length === 0) {
+          logger.error(`Session ${ref.id}: no speaker tags recognized. Raw starts:\n${raw.slice(0, 800)}`);
+        }
       } finally {
         deleteGeminiFile(geminiFile.name, apiKey);
       }
     }
 
-    // Normalize to a canonical "[Speaker N]:" transcript so every downstream
-    // step (snippets, mapping replacement, analysis) works regardless of how
-    // the model formatted its labels.
-    const { speakers, snippets, canonical } = parseTranscript(rawTranscript);
-    if (speakers.length === 0) {
-      logger.error(
-        `Session ${ref.id}: no speaker tags recognized. Raw transcript starts:\n` +
-          rawTranscript.slice(0, 800)
-      );
+    if (entries.length === 0) {
       throw new Error(
-        "La transcripción se generó pero no se reconocieron etiquetas de hablante. Revisa los logs de la función para ver el formato devuelto por el modelo."
+        "La transcripción se generó pero no se reconocieron etiquetas de hablante. Revisa los logs de la función."
       );
     }
+
+    // Unify segment-local voices into global speakers, then build the
+    // canonical timestamped transcript every downstream step consumes.
+    await touchLock("unificando voces");
+    logger.info(`Session ${ref.id}: consolidating voices`);
+    const clusterMap = await consolidateVoices(entries, members.length, apiKey);
+    entries = entries.map((e) => ({ ...e, num: clusterMap.get(e.label) }));
+
+    const canonical = entries
+      .map((e) => (e.t !== null ? `[${fmtTime(e.t)}] ` : "") + `[Speaker ${e.num}]: ${e.text}`)
+      .join("\n");
+
+    const { speakers, stats, excerpts, snippets } = buildSpeakerEvidence(entries);
     logger.info(`Session ${ref.id}: recognized ${speakers.length} speakers (${speakers.join(", ")})`);
 
     // Suggested mapping (hint only — a human confirms it in the SPA).
@@ -503,7 +656,10 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
       transcriptExcerpt: canonical.slice(0, 1500),
       detectedSpeakers: speakers,
       speakerSnippets: snippets,
+      speakerExcerpts: excerpts,
+      speakerStats: stats,
       suggestedMapping,
+      progressNote: null,
       updatedAt: new Date().toISOString(),
     });
 

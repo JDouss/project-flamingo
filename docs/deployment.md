@@ -61,9 +61,18 @@ Long recordings are split because a single Gemini generation over ~2 h of
 audio degenerates (`finishReason: MALFORMED_RESPONSE`), and prompting it to
 transcribe only a time window does not bound the work — it still ingests the
 whole file. Segmenting the actual audio is what keeps each generation small.
-A stable 5-person panel may surface as 6–8 detected voices (numbering can
-drift across segment boundaries); the mapping step collapses extras onto the
-right member and grades dedupe by name, so stats stay correct.
+
+Voice identity across segments is NOT trusted to the model (it cannot match
+a voice it hears now to a text quote from another API call). Instead each
+segment uses local numbering with per-turn `[mm:ss]` timestamps, and a
+text-based consolidation pass merges local voices into global speakers using
+conversation continuity across segment boundaries, self-references, and
+style. The mapping step then shows, per voice: participation stats and up to
+3 long excerpts from different moments, each with a ▶ button that seeks the
+session audio player to that exact second — identification is by listening.
+If a voice is still split in two, assigning both to the same member merges
+them (grades dedupe by name), and a "volver a transcribir" escape hatch
+re-runs the whole transcription.
 
 Any stage can fail or stall → the session shows an error/stale badge in the history with a retry that resumes from the right stage. Correcting a bad voice assignment later: open the draft → "Corregir asignación de voces" → re-analyze.
 
