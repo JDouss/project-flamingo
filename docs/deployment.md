@@ -29,6 +29,10 @@ npm run build
 firebase deploy --only hosting
 ```
 
+> The functions bundle `ffmpeg-static` (a ~80 MB binary pulled in by
+> `npm install`) to split long recordings before transcription — see §6.
+> `transcribeSession` runs with 2 GiB memory / 3600 s for this reason.
+
 Notes:
 - Deploys two callables to `europe-west1`: `transcribeSession` and `analyzeSession` (1 GiB, 3600 s). First deploy may ask to enable Cloud Build / Artifact Registry — accept.
 - No Storage trigger anymore: the SPA invokes the functions after upload; they keep running server-side even if the tab closes.
@@ -41,7 +45,10 @@ After deploying: open the app → **Sesión de Club → Historial de sesiones**.
 ## 6. Pipeline flow (what to expect)
 
 ```
-Subir audio  →  queued  →  transcribing        (Gemini, anonymous [Speaker N] tags)
+Subir audio  →  queued  →  transcribing        (ffmpeg splits audio into 30-min
+                                                segments; each transcribed by Gemini
+                                                with anonymous [Speaker N] tags,
+                                                numbering carried across segments)
              →  needs_mapping                  (HUMAN: confirm who each voice is;
                                                 AI suggestions pre-filled with confidence)
              →  analyzing                      (Gemini, names locked; grades validated
@@ -49,6 +56,14 @@ Subir audio  →  queued  →  transcribing        (Gemini, anonymous [Speaker N
              →  draft                          (HUMAN: review + publish)
              →  published
 ```
+
+Long recordings are split because a single Gemini generation over ~2 h of
+audio degenerates (`finishReason: MALFORMED_RESPONSE`), and prompting it to
+transcribe only a time window does not bound the work — it still ingests the
+whole file. Segmenting the actual audio is what keeps each generation small.
+A stable 5-person panel may surface as 6–8 detected voices (numbering can
+drift across segment boundaries); the mapping step collapses extras onto the
+right member and grades dedupe by name, so stats stay correct.
 
 Any stage can fail or stall → the session shows an error/stale badge in the history with a retry that resumes from the right stage. Correcting a bad voice assignment later: open the draft → "Corregir asignación de voces" → re-analyze.
 

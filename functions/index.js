@@ -28,6 +28,11 @@ import { initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { fetch, Agent, setGlobalDispatcher } from "undici";
+import { spawn } from "node:child_process";
+import { mkdtemp, writeFile, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import ffmpegPath from "ffmpeg-static";
 
 // Node's built-in fetch aborts after undici's default 300s headers timeout.
 // Transcribing a 2-hour recording (non-streaming) keeps Gemini busy far
@@ -51,7 +56,9 @@ const ADMIN_EMAILS = ["doussinague95@gmail.com"];
 
 const CALL_OPTS = {
   region: "europe-west1",
-  memory: "1GiB",
+  // 2 GiB: the function splits the audio with ffmpeg into /tmp (tmpfs, counts
+  // against memory) and buffers segments before uploading them to Gemini.
+  memory: "2GiB",
   timeoutSeconds: 3600,
   secrets: [geminiApiKey],
 };
@@ -183,18 +190,132 @@ async function generateContent(parts, apiKey, generationConfig = {}) {
 // Stage 1 — transcription with anonymous diarization
 // ---------------------------------------------------------------------------
 
-function buildTranscriptionPrompt(memberCount) {
-  return `Transcribe íntegramente esta grabación de una sesión de un club de lectura en español.
+// A single generation over a 2h recording degenerates (MALFORMED_RESPONSE),
+// and asking Gemini to transcribe "only minute X to Y" of a long file does
+// NOT bound the work — it still ingests the whole upload. So we physically
+// split the audio with ffmpeg into ~30-min segments and transcribe each
+// separately; each request then contains only ~30 min of audio.
+const CHUNK_SECONDS = 1800; // 30-minute segments
 
-Reglas ESTRICTAS de diarización:
-- Cada intervención empieza en su propia línea con la etiqueta EXACTA "[Speaker N]:" (corchetes incluidos, la palabra inglesa "Speaker", número, dos puntos). NO la traduzcas a "Hablante"; NO uses markdown (nada de ** o _); NO añadas marcas de tiempo. Ejemplo literal: [Speaker 1]: Hola a todos.
-- Numera las voces por orden de primera aparición: [Speaker 1], [Speaker 2], ...
-- El club suele tener ${memberCount || 5} miembros, pero usa exactamente tantas etiquetas como voces DISTINTAS oigas realmente; no fuerces el número.
-- Sé consistente: la misma voz debe llevar SIEMPRE la misma etiqueta durante toda la grabación. Presta atención al timbre, no al tema.
-- NO uses nombres propios en las etiquetas aunque los oigas; siempre [Speaker N].
-- No resumas ni omitas nada; transcripción literal con puntuación correcta.
+function buildSegmentPrompt(memberCount, roster, segmentIndex, segmentCount) {
+  const rosterText = roster.length
+    ? `Voces ya identificadas en fragmentos anteriores (reutiliza EXACTAMENTE el mismo número para la misma voz; añade un número nuevo SOLO si aparece una voz nueva que no esté en esta lista):\n${roster
+        .map((r) => `- [Speaker ${r.num}]: «${r.snippet}»`)
+        .join("\n")}`
+    : "Es el primer fragmento; numera las voces por orden de aparición empezando en [Speaker 1].";
 
-Devuelve ÚNICAMENTE la transcripción, empezando directamente por "[Speaker 1]:", sin ningún texto introductorio.`;
+  return `Este es el fragmento ${segmentIndex + 1} de ${segmentCount} de la grabación de una sesión de un club de lectura en español. Transcríbelo ÍNTEGRAMENTE y de forma literal.
+
+Formato: cada intervención en su propia línea con la etiqueta EXACTA "[Speaker N]:" (corchetes, palabra inglesa Speaker, número, dos puntos). Sin markdown, sin marcas de tiempo, sin nombres propios.
+
+El club suele tener ${memberCount || 5} miembros.
+${rosterText}
+
+Devuelve ÚNICAMENTE la transcripción de este fragmento, empezando directamente por una etiqueta [Speaker N]:.`;
+}
+
+async function generateChunkWithRetry(parts, apiKey, tries = 3) {
+  let lastErr;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      return await generateContent(parts, apiKey, { maxOutputTokens: 16384 });
+    } catch (err) {
+      lastErr = err;
+      logger.warn(`Segment generation attempt ${attempt}/${tries} failed: ${err.message}`);
+    }
+  }
+  throw lastErr;
+}
+
+// Split an audio buffer into ~CHUNK_SECONDS segments using a stream copy (no
+// re-encode: fast, lossless). Returns the segment buffers plus a cleanup fn.
+async function splitAudio(buffer, ext) {
+  const dir = await mkdtemp(path.join(tmpdir(), "flamingo-"));
+  const cleanup = () => rm(dir, { recursive: true, force: true }).catch(() => {});
+  try {
+    const inputPath = path.join(dir, `input.${ext}`);
+    await writeFile(inputPath, buffer);
+    const pattern = path.join(dir, `seg_%03d.${ext}`);
+
+    await new Promise((resolve, reject) => {
+      const ff = spawn(ffmpegPath, [
+        "-hide_banner", "-loglevel", "error",
+        "-i", inputPath,
+        "-f", "segment",
+        "-segment_time", String(CHUNK_SECONDS),
+        "-c", "copy",
+        "-reset_timestamps", "1",
+        pattern,
+      ]);
+      let stderr = "";
+      ff.stderr.on("data", (d) => (stderr += d.toString()));
+      ff.on("error", reject);
+      ff.on("close", (code) =>
+        code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(0, 300)}`))
+      );
+    });
+
+    const files = (await readdir(dir)).filter((f) => f.startsWith("seg_")).sort();
+    const segments = [];
+    for (const f of files) segments.push(await readFile(path.join(dir, f)));
+    if (segments.length === 0) throw new Error("ffmpeg produced no segments.");
+    return { segments, cleanup };
+  } catch (err) {
+    await cleanup();
+    throw err;
+  }
+}
+
+// Transcribe the whole recording segment by segment, returning the raw
+// concatenated transcript. `onProgress(note)` keeps the session lock fresh.
+// Returns null if the audio could not be split (caller falls back).
+async function transcribeInSegments(buffer, ext, mimeType, apiKey, memberCount, onProgress) {
+  let split;
+  try {
+    split = await splitAudio(buffer, ext);
+  } catch (err) {
+    logger.warn(`ffmpeg split failed (${err.message}); falling back to single-file transcription.`);
+    return null;
+  }
+
+  try {
+    const total = split.segments.length;
+    logger.info(`Split audio into ${total} segment(s).`);
+    const parts = [];
+    const roster = [];
+
+    for (let i = 0; i < total; i++) {
+      if (onProgress) await onProgress(`fragmento ${i + 1}/${total}`);
+      const geminiFile = await uploadToGeminiFiles(split.segments[i], mimeType, `segment-${i}`, apiKey);
+      try {
+        const raw = await generateChunkWithRetry(
+          [
+            { file_data: { file_uri: geminiFile.uri, mime_type: mimeType } },
+            { text: buildSegmentPrompt(memberCount, roster, i, total) },
+          ],
+          apiKey
+        );
+        const parsed = parseTranscript(raw);
+        if (parsed.speakers.length > 0) {
+          parts.push(parsed.canonical);
+          for (const tag of parsed.speakers) {
+            const num = tag.replace(/\D/g, "");
+            if (!roster.some((r) => r.num === num)) {
+              roster.push({ num, snippet: parsed.snippets[tag] });
+            }
+          }
+        } else {
+          logger.warn(`Segment ${i + 1}/${total} produced no speaker tags; raw starts: ${raw.slice(0, 200)}`);
+        }
+      } finally {
+        deleteGeminiFile(geminiFile.name, apiKey);
+      }
+    }
+
+    return parts.join("\n");
+  } finally {
+    await split.cleanup();
+  }
 }
 
 const SUGGESTION_SCHEMA = {
@@ -295,7 +416,6 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
 
   const apiKey = geminiApiKey.value();
   const bucket = getStorage().bucket();
-  let geminiFile = null;
 
   try {
     await ref.update({ status: "transcribing", error: null, errorStage: null, updatedAt: new Date().toISOString() });
@@ -306,20 +426,32 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
     const ext = data.audioPath.toLowerCase().split(".").pop();
     const mimeType = MIME_BY_EXT[ext] || "audio/mp3";
 
-    logger.info(`Session ${ref.id}: uploading ${buffer.length} bytes to Gemini`);
-    geminiFile = await uploadToGeminiFiles(buffer, mimeType, data.audioName || "session-audio", apiKey);
-
     const membersSnap = await db.collection(MEMBERS_COLLECTION).get();
     const members = membersSnap.docs.map((d) => d.data());
 
-    logger.info(`Session ${ref.id}: transcribing`);
-    const rawTranscript = await generateContent(
-      [
-        { file_data: { file_uri: geminiFile.uri, mime_type: mimeType } },
-        { text: buildTranscriptionPrompt(members.length) },
-      ],
-      apiKey
-    );
+    const touchLock = (note) =>
+      ref.update({ status: "transcribing", progressNote: note, updatedAt: new Date().toISOString() });
+
+    logger.info(`Session ${ref.id}: transcribing (${buffer.length} bytes) by segments`);
+    let rawTranscript = await transcribeInSegments(buffer, ext, mimeType, apiKey, members.length, touchLock);
+
+    // Fallback: ffmpeg unavailable/failed — transcribe the whole file in one
+    // call (works for short recordings; long ones may hit MALFORMED_RESPONSE).
+    if (rawTranscript === null) {
+      logger.info(`Session ${ref.id}: single-file transcription fallback`);
+      const geminiFile = await uploadToGeminiFiles(buffer, mimeType, data.audioName || "session-audio", apiKey);
+      try {
+        rawTranscript = await generateChunkWithRetry(
+          [
+            { file_data: { file_uri: geminiFile.uri, mime_type: mimeType } },
+            { text: buildSegmentPrompt(members.length, [], 0, 1) },
+          ],
+          apiKey
+        );
+      } finally {
+        deleteGeminiFile(geminiFile.name, apiKey);
+      }
+    }
 
     // Normalize to a canonical "[Speaker N]:" transcript so every downstream
     // step (snippets, mapping replacement, analysis) works regardless of how
@@ -380,8 +512,6 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
   } catch (err) {
     await failSession(ref, "transcription", err);
     throw new HttpsError("internal", err.message || "Transcription failed.");
-  } finally {
-    if (geminiFile) deleteGeminiFile(geminiFile.name, apiKey);
   }
 });
 
