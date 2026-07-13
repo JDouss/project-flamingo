@@ -27,6 +27,15 @@ import { logger } from "firebase-functions";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+import { fetch, Agent, setGlobalDispatcher } from "undici";
+
+// Node's built-in fetch aborts after undici's default 300s headers timeout.
+// Transcribing a 2-hour recording (non-streaming) keeps Gemini busy far
+// longer than that before the response starts, so we use undici's fetch with
+// the header/body timeouts disabled — the function's own 3600s timeout is the
+// real ceiling. `connectTimeout` stays finite so genuine network failures
+// still surface quickly.
+setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 60_000 }));
 
 initializeApp();
 
