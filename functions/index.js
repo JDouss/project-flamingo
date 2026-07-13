@@ -706,12 +706,64 @@ const ANALYSIS_SCHEMA = {
         required: ["name", "voiceSnippet", "summary"],
       },
     },
-    sessionSummaryMarkdown: { type: "string" },
   },
-  required: ["generalSummary", "grades", "speakers", "sessionSummaryMarkdown"],
+  required: ["generalSummary", "grades", "speakers"],
 };
 
-function buildAnalysisPrompt(transcript, participants) {
+// Dedicated grades extraction. Inside the big analysis call the final round
+// of marks is a few short lines buried at the end of a ~2h transcript and
+// gets skimmed over. This focused call receives ONLY the opening and closing
+// stretches of the session (where the club's two rating rounds actually
+// happen) and must cite the verbatim sentence for every mark it reports.
+const GRADES_SCHEMA = {
+  type: "object",
+  properties: {
+    grades: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          member: { type: "string" },
+          start: { type: "number", nullable: true },
+          startQuote: { type: "string", nullable: true },
+          end: { type: "number", nullable: true },
+          endQuote: { type: "string", nullable: true },
+        },
+        required: ["member"],
+      },
+    },
+  },
+  required: ["grades"],
+};
+
+function buildGradesPrompt(head, tail, participants) {
+  return `RITUAL DE NOTAS del club de lectura: en cada sesión, cada miembro puntúa el libro de 1 a 10 DOS veces — la RONDA INICIAL ocurre cerca del principio del debate y la RONDA FINAL cerca del final (mide si el debate cambió su opinión).
+
+Participantes (usa EXACTAMENTE estos nombres): ${participants.join(", ")}.
+
+Abajo tienes el TRAMO INICIAL y el TRAMO FINAL de la transcripción. Extrae las notas de ambas rondas:
+- Las notas pueden decirse con decimales o de palabra: "un ocho y medio" = 8.5, "entre 7 y 8" = 7.5, "nueve" = 9.
+- Para CADA nota que reportes, copia en startQuote/endQuote la frase textual donde el miembro la dice.
+- Si un miembro no da nota explícita en una ronda, deja ese campo (y su quote) en null. NO inventes ni deduzcas notas de comentarios generales.
+- La nota de la ronda final debe salir del TRAMO FINAL; la inicial, del TRAMO INICIAL.
+
+TRAMO INICIAL:
+"""
+${head}
+"""
+
+TRAMO FINAL:
+"""
+${tail}
+"""`;
+}
+
+// The analysis is split in two generations on purpose: a compact JSON call
+// for structured fields, and a PLAIN-TEXT call for the session-memory
+// markdown. Embedding a multi-page document as a JSON string is what caused
+// truncated/invalid JSON around the 64k-char mark — plain text has no
+// escaping or parsing to break.
+function buildAnalysisJsonPrompt(transcript, participants) {
   return `Eres un analista literario experto. Analiza esta transcripción de una sesión de debate de un club de lectura. Los hablantes ya están identificados con sus nombres reales, confirmados por un humano.
 
 Participantes de esta sesión (usa EXACTAMENTE estos nombres, sin variantes): ${participants.join(", ")}.
@@ -727,10 +779,24 @@ Genera un JSON con:
 - bookTitle / bookAuthor / genre: deducidos del debate (null si no es posible).
 - generalSummary: resumen ejecutivo de la sesión (2-3 párrafos): dinámica de grupo y tono del debate.
 - grades: un elemento por participante con su nota inicial (start) y final (end), null donde no haya nota explícita.
-- speakers: para cada participante: name, voiceSnippet (una cita textual breve y característica suya) y summary (sus opiniones clave, redactadas en primera persona).
-- sessionSummaryMarkdown: documento Markdown con EXACTAMENTE estas secciones en este orden:
+- speakers: para cada participante: name, voiceSnippet (una cita textual breve y característica suya) y summary (sus opiniones clave, redactadas en primera persona, máximo 3 frases).
 
-# Memoria y Resumen del Debate - [Título del Libro]
+Sé conciso en todos los campos de texto.`;
+}
+
+function buildMemoriaPrompt(transcript, participants, bookTitle) {
+  return `Eres un analista literario experto. A partir de esta transcripción de una sesión de debate de un club de lectura (hablantes ya identificados con sus nombres reales), redacta la memoria de la sesión.
+
+Participantes: ${participants.join(", ")}.
+
+Transcripción:
+"""
+${transcript}
+"""
+
+Redacta un documento Markdown con EXACTAMENTE estas secciones en este orden (y nada más):
+
+# Memoria y Resumen del Debate - ${bookTitle || "[Título del Libro]"}
 
 ## Resumen Ejecutivo de la Sesión
 (Ambiente de la reunión, puntos álgidos del debate.)
@@ -745,7 +811,33 @@ Genera un JSON con:
 (Discusión sobre los personajes principales y su desarrollo.)
 
 ## Conclusiones, Puntos de Acuerdo y Citas Destacadas
-(Conclusiones clave y citas textuales o parafraseadas que resuman el alma de la sesión.)`;
+(Conclusiones clave y citas textuales o parafraseadas que resuman el alma de la sesión.)
+
+Devuelve ÚNICAMENTE el documento Markdown, sin envolverlo en \`\`\`.`;
+}
+
+// Strip a ```markdown ... ``` wrapper if the model added one.
+function unwrapMarkdown(text) {
+  const t = text.trim();
+  const m = t.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n?```$/);
+  return m ? m[1].trim() : t;
+}
+
+async function generateJsonWithRetry(prompt, schema, apiKey, tries = 3) {
+  let lastErr;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      const raw = await generateContent([{ text: prompt }], apiKey, {
+        responseMimeType: "application/json",
+        responseSchema: schema,
+      });
+      return JSON.parse(raw);
+    } catch (err) {
+      lastErr = err;
+      logger.warn(`JSON generation attempt ${attempt}/${tries} failed: ${err.message}`);
+    }
+  }
+  throw lastErr;
 }
 
 // Only grades for confirmed participants may enter the stats; names are
@@ -810,12 +902,50 @@ export const analyzeSession = onCall(CALL_OPTS, async (request) => {
     const participants = [...new Set(Object.values(mapping).map((n) => String(n).trim()).filter(Boolean))];
 
     logger.info(`Session ${ref.id}: analyzing with participants ${participants.join(", ")}`);
-    const analysisRaw = await generateContent(
-      [{ text: buildAnalysisPrompt(transcript, participants) }],
-      apiKey,
-      { responseMimeType: "application/json", responseSchema: ANALYSIS_SCHEMA }
+    const parsed = await generateJsonWithRetry(
+      buildAnalysisJsonPrompt(transcript, participants),
+      ANALYSIS_SCHEMA,
+      apiKey
     );
-    const parsed = JSON.parse(analysisRaw);
+
+    // Focused pass over the stretches where the two rating rounds happen;
+    // its evidence-backed results override the big call's, which fills gaps.
+    let gradesArray = parsed.grades || [];
+    try {
+      logger.info(`Session ${ref.id}: extracting grades (focused pass)`);
+      const head = transcript.slice(0, 24000);
+      const tail = transcript.slice(-32000);
+      const dedicated = await generateJsonWithRetry(
+        buildGradesPrompt(head, tail, participants),
+        GRADES_SCHEMA,
+        apiKey,
+        2
+      );
+      const byName = new Map(
+        gradesArray.map((g) => [(g.member || "").toLowerCase(), { ...g }])
+      );
+      for (const d of dedicated.grades || []) {
+        const key = (d.member || "").trim().toLowerCase();
+        if (!key) continue;
+        const cur = byName.get(key) || { member: d.member };
+        if (d.start !== null && d.start !== undefined) cur.start = d.start;
+        if (d.end !== null && d.end !== undefined) cur.end = d.end;
+        byName.set(key, cur);
+        logger.info(
+          `Grade evidence — ${d.member}: start=${d.start} («${d.startQuote || "—"}») end=${d.end} («${d.endQuote || "—"}»)`
+        );
+      }
+      gradesArray = [...byName.values()];
+    } catch (err) {
+      logger.warn(`Focused grades extraction failed (non-fatal): ${err.message}`);
+    }
+
+    logger.info(`Session ${ref.id}: writing session memory`);
+    const memoriaRaw = await generateContent(
+      [{ text: buildMemoriaPrompt(transcript, participants, parsed.bookTitle) }],
+      apiKey
+    );
+    const sessionSummaryMarkdown = unwrapMarkdown(memoriaRaw);
 
     // Persist the named transcript for BookDetails; keep the anonymous
     // original so re-running the analysis with a corrected mapping works.
@@ -833,9 +963,9 @@ export const analyzeSession = onCall(CALL_OPTS, async (request) => {
         bookAuthor: parsed.bookAuthor || null,
         genre: parsed.genre || null,
         generalSummary: parsed.generalSummary || "",
-        grades: reshapeAndValidateGrades(parsed.grades, participants),
+        grades: reshapeAndValidateGrades(gradesArray, participants),
         speakers: (parsed.speakers || []).filter((s) => participants.includes(s.name)),
-        sessionSummaryMarkdown: parsed.sessionSummaryMarkdown || "",
+        sessionSummaryMarkdown,
       },
       updatedAt: new Date().toISOString(),
     });
