@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { UploadCloud, FileAudio, AlertTriangle, Sparkles, Loader2, CheckCircle2 } from 'lucide-react';
-import { startSessionUpload } from '../../data/mutations';
+import { UploadCloud, FileAudio, AlertTriangle, Sparkles, Loader2, CheckCircle2, RotateCcw, Clock } from 'lucide-react';
+import { startSessionUpload, retrySession } from '../../data/mutations';
+import { sessionStatus, isSessionStale } from '../../data/useSessions';
 
 const FUNNY_MESSAGES = [
   'Evaluando pedantería intelectual...',
@@ -22,6 +23,12 @@ const FUNNY_MESSAGES = [
   'Sincronizando egos de los participantes...',
 ];
 
+const WORKING_LABELS = {
+  queued: 'Sesión en cola para transcribir',
+  transcribing: 'Transcribiendo y separando voces',
+  analyzing: 'Generando el análisis de la sesión',
+};
+
 const VALID_EXTENSIONS = ['.mp3', '.wav', '.flac', '.ogg'];
 
 function isValidAudioFile(file) {
@@ -34,20 +41,23 @@ function isValidAudioFile(file) {
 }
 
 // Upload a session recording and follow the pipeline live. Once the upload
-// finishes the browser is no longer needed: the Cloud Function keeps going
-// and the status here (or in the history tab) updates via onSnapshot.
+// finishes the browser is no longer needed: the callable function keeps
+// running server-side and the doc subscription reflects every stage here
+// (or in the history tab) whenever the user comes back.
 export default function UploadStep({ session, onSessionStarted, onReset }) {
   const [audioFile, setAudioFile] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [uploadProgress, setUploadProgress] = useState(-1);
   const [funnyMsg, setFunnyMsg] = useState('');
+  const [retrying, setRetrying] = useState(false);
 
-  const status = session?.status; // uploading | processing | error (draft is handled by ReviewStep)
-  const isBusy = uploadProgress >= 0 || status === 'uploading' || status === 'processing';
+  const status = session ? sessionStatus(session) : null;
+  const stale = session ? isSessionStale(session) : false;
+  const isWorking = status === 'queued' || status === 'transcribing' || status === 'analyzing';
 
   useEffect(() => {
-    if (status !== 'processing') {
+    if (status !== 'transcribing' && status !== 'analyzing') {
       setFunnyMsg('');
       return;
     }
@@ -81,7 +91,19 @@ export default function UploadStep({ session, onSessionStarted, onReset }) {
     }
   };
 
-  const handleRetry = () => {
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      await retrySession(session);
+    } catch (err) {
+      console.error('Retry failed:', err);
+      setErrorMsg(err.message || 'No se pudo reintentar.');
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const handleStartOver = () => {
     setAudioFile(null);
     setErrorMsg('');
     onReset();
@@ -89,41 +111,53 @@ export default function UploadStep({ session, onSessionStarted, onReset }) {
 
   // ---- Live pipeline states ----
 
-  if (status === 'error') {
+  if (status === 'error' || (isWorking && stale)) {
+    const isError = status === 'error';
     return (
       <div style={{ marginTop: '1rem' }}>
         <div className="voice-alert-danger">
-          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-          <span>El procesado de la sesión falló: {session.error || 'error desconocido'}</span>
+          {isError ? <AlertTriangle size={16} style={{ flexShrink: 0 }} /> : <Clock size={16} style={{ flexShrink: 0 }} />}
+          <span>
+            {isError
+              ? `El procesado falló${session.errorStage ? ` (etapa: ${session.errorStage})` : ''}: ${session.error || 'error desconocido'}`
+              : 'Esta sesión lleva demasiado tiempo en proceso. Es probable que el servidor no la haya recibido (¿funciones sin desplegar?) o que el proceso muriera a mitad.'}
+          </span>
         </div>
-        <button type="button" className="btn btn-secondary" onClick={handleRetry} style={{ marginTop: '1rem' }}>
-          Procesar otra grabación
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+          <button type="button" className="btn btn-primary" onClick={handleRetry} disabled={retrying} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            {retrying ? <Loader2 className="voice-spinner" size={14} /> : <RotateCcw size={14} />} Reintentar procesado
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={handleStartOver}>
+            Procesar otra grabación
+          </button>
+        </div>
       </div>
     );
   }
 
-  if (status === 'uploading' || status === 'processing' || uploadProgress >= 0) {
+  if (isWorking || uploadProgress >= 0) {
     const isUploading = uploadProgress >= 0;
     return (
       <div className="voice-processing-box">
         <Loader2 className="voice-spinner" size={32} />
         <p style={{ fontWeight: '600', fontSize: '1rem', marginTop: '1rem' }}>
-          {isUploading ? `Subiendo audio... ${uploadProgress}%` : 'Transcribiendo y analizando la sesión'}
+          {isUploading ? `Subiendo audio... ${uploadProgress}%` : WORKING_LABELS[status]}
         </p>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center', maxWidth: '380px', marginTop: '0.25rem' }}>
           {isUploading
             ? 'No cierres esta pestaña hasta que termine la subida.'
-            : 'La IA está trabajando en el servidor. Puedes cerrar esta ventana (o la pestaña): el borrador aparecerá en el Historial de sesiones cuando esté listo.'}
+            : status === 'transcribing'
+              ? 'La IA está transcribiendo en el servidor. Puedes cerrar esta ventana: cuando termine te pedirá confirmar quién es cada voz (Historial de sesiones).'
+              : 'El análisis corre en el servidor. Puedes cerrar esta ventana: el borrador aparecerá en el Historial de sesiones.'}
         </p>
         {funnyMsg && (
           <div style={{
             fontSize: '0.8rem',
-            color: 'var(--primary)',
+            color: 'var(--primary-ink)',
             fontStyle: 'italic',
             marginTop: '0.75rem',
             fontWeight: '600',
-            background: 'var(--primary-glow)',
+            background: 'var(--primary-light)',
             padding: '0.4rem 0.85rem',
             borderRadius: '12px',
             border: '1px dashed var(--primary)',
@@ -143,7 +177,7 @@ export default function UploadStep({ session, onSessionStarted, onReset }) {
       <div className="voice-processing-box">
         <CheckCircle2 size={32} style={{ color: 'var(--sage)' }} />
         <p style={{ fontWeight: '600', fontSize: '1rem', marginTop: '1rem' }}>Sesión publicada</p>
-        <button type="button" className="btn btn-secondary" onClick={handleRetry} style={{ marginTop: '1rem' }}>
+        <button type="button" className="btn btn-secondary" onClick={handleStartOver} style={{ marginTop: '1rem' }}>
           Procesar otra grabación
         </button>
       </div>
@@ -176,7 +210,7 @@ export default function UploadStep({ session, onSessionStarted, onReset }) {
         <UploadCloud className="voice-upload-icon" />
         {audioFile ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)' }}>
-            <FileAudio size={18} style={{ color: 'var(--primary)' }} />
+            <FileAudio size={18} style={{ color: 'var(--primary-ink)' }} />
             <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>{audioFile.name}</span>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               ({(audioFile.size / (1024 * 1024)).toFixed(2)} MB)
@@ -185,7 +219,7 @@ export default function UploadStep({ session, onSessionStarted, onReset }) {
         ) : (
           <>
             <p style={{ fontSize: '0.9rem', fontWeight: '600' }}>
-              Arrastra y suelta la grabación de la reunión aquí, o <span style={{ color: 'var(--primary)' }}>busca un archivo</span>
+              Arrastra y suelta la grabación de la reunión aquí, o <span style={{ color: 'var(--primary-ink)' }}>busca un archivo</span>
             </p>
             <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               Formatos soportados: MP3, WAV, FLAC, OGG
@@ -205,12 +239,12 @@ export default function UploadStep({ session, onSessionStarted, onReset }) {
       />
 
       <div className="voice-notice-box">
-        <AlertTriangle size={14} style={{ flexShrink: 0, color: 'var(--accent-gold)', marginTop: '0.1rem' }} />
+        <AlertTriangle size={14} style={{ flexShrink: 0, color: 'var(--accent-sunset)', marginTop: '0.1rem' }} />
         <div>
-          <p style={{ fontWeight: '600', color: 'var(--accent-gold)', fontSize: '0.8rem', marginBottom: '0.2rem' }}>Recomendación de tamaño de archivo</p>
+          <p style={{ fontWeight: '600', color: 'var(--accent-sunset)', fontSize: '0.8rem', marginBottom: '0.2rem' }}>Recomendación de tamaño de archivo</p>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
             Para reuniones de 1 a 2 horas, exporta el audio como MP3 mono de 32 kbps (una hora ≈ 14 MB).
-            Una vez subido, el análisis corre en el servidor: no hace falta mantener la pestaña abierta.
+            Tras la subida, el análisis corre en el servidor: no hace falta mantener la pestaña abierta.
           </p>
         </div>
       </div>
@@ -220,7 +254,7 @@ export default function UploadStep({ session, onSessionStarted, onReset }) {
           type="button"
           className="btn btn-primary"
           onClick={handleStart}
-          disabled={isBusy}
+          disabled={uploadProgress >= 0}
           style={{ width: '100%', marginTop: '1.5rem', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}
         >
           <Sparkles size={16} /> Subir y analizar con IA

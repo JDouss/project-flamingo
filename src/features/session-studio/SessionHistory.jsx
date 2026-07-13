@@ -1,10 +1,13 @@
-import { X, Volume2, Loader2, PenLine, AlertTriangle } from 'lucide-react';
-import { useSessionList, sessionStatus } from '../../data/useSessions';
+import { X, Volume2, Loader2, PenLine, AlertTriangle, Users, Clock } from 'lucide-react';
+import { useSessionList, sessionStatus, isSessionStale } from '../../data/useSessions';
 import { deleteSession } from '../../data/mutations';
 
 const STATUS_META = {
-  uploading: { label: 'Subiendo', color: 'var(--accent-gold)' },
-  processing: { label: 'Procesando', color: 'var(--accent-rock)' },
+  uploading: { label: 'Subiendo', color: 'var(--accent-gold)', working: true },
+  queued: { label: 'En cola', color: 'var(--accent-gold)', working: true },
+  transcribing: { label: 'Transcribiendo', color: 'var(--accent-rock)', working: true },
+  needs_mapping: { label: 'Esperando asignación de voces', color: 'var(--accent-gold)' },
+  analyzing: { label: 'Analizando', color: 'var(--accent-rock)', working: true },
   draft: { label: 'Borrador — pendiente de revisión', color: 'var(--accent-gold)' },
   published: { label: 'Publicada', color: 'var(--sage)' },
   error: { label: 'Error', color: 'var(--accent-coral)' },
@@ -55,8 +58,12 @@ export default function SessionHistory({ books, onOpenSession }) {
       <div className="voice-history-list">
         {sessions.map((session) => {
           const status = sessionStatus(session);
-          const meta = STATUS_META[status] || STATUS_META.published;
+          const stale = isSessionStale(session);
+          const meta = stale
+            ? { label: 'Atascada — necesita reintento', color: 'var(--accent-coral)' }
+            : (STATUS_META[status] || STATUS_META.published);
           const linkedBook = bookTitleFor(session);
+          const needsAttention = stale || status === 'error' || status === 'needs_mapping' || status === 'draft';
 
           return (
             <div key={session.id} className="voice-history-item">
@@ -76,8 +83,9 @@ export default function SessionHistory({ books, onOpenSession }) {
                     fontSize: '0.7rem', fontWeight: 'bold', color: meta.color,
                     border: `1px solid ${meta.color}`, borderRadius: '10px', padding: '0.1rem 0.5rem'
                   }}>
-                    {status === 'processing' && <Loader2 className="voice-spinner" size={10} />}
-                    {status === 'error' && <AlertTriangle size={10} />}
+                    {stale ? <Clock size={10} /> : meta.working ? <Loader2 className="voice-spinner" size={10} /> : null}
+                    {status === 'error' && !stale && <AlertTriangle size={10} />}
+                    {status === 'needs_mapping' && !stale && <Users size={10} />}
                     {meta.label}
                   </span>
                   {status === 'error' && session.error && (
@@ -100,7 +108,7 @@ export default function SessionHistory({ books, onOpenSession }) {
                 </div>
               )}
 
-              {status === 'draft' && (
+              {needsAttention && (
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
                   <button
                     type="button"
@@ -108,7 +116,13 @@ export default function SessionHistory({ books, onOpenSession }) {
                     style={{ padding: '0.35rem 0.75rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
                     onClick={() => onOpenSession(session.id)}
                   >
-                    <PenLine size={13} /> Revisar y publicar
+                    {status === 'draft' ? (
+                      <><PenLine size={13} /> Revisar y publicar</>
+                    ) : status === 'needs_mapping' ? (
+                      <><Users size={13} /> Asignar voces</>
+                    ) : (
+                      <><AlertTriangle size={13} /> Ver problema</>
+                    )}
                   </button>
                 </div>
               )}

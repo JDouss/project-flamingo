@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import UploadStep from './UploadStep';
+import MappingStep from './MappingStep';
 import ReviewStep from './ReviewStep';
 import SessionHistory from './SessionHistory';
 import MembersRegistry from './MembersRegistry';
-import { useSession } from '../../data/useSessions';
+import { useSession, sessionStatus } from '../../data/useSessions';
 
 // Session Studio: the club-session pipeline UI. Upload a recording and walk
 // away — the Cloud Function transcribes and analyzes it; the doc subscription
@@ -66,7 +67,7 @@ export default function SessionStudio({ isOpen, onClose, books }) {
         {/* Body */}
         <div className="voice-assistant-body">
           {activeTab === 'new' ? (
-            session && session.status === 'draft' ? (
+            session && sessionStatus(session) === 'draft' ? (
               <ReviewStep
                 session={session}
                 books={books}
@@ -76,6 +77,8 @@ export default function SessionStudio({ isOpen, onClose, books }) {
                 }}
                 onDiscard={resetPipeline}
               />
+            ) : session && sessionStatus(session) === 'needs_mapping' ? (
+              <MappingStep session={session} />
             ) : (
               <UploadStep
                 session={session}

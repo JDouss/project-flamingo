@@ -7,7 +7,8 @@ import {
   deleteDoc,
 } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { db, storage, SESSIONS_COLLECTION } from "./firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, storage, functions, SESSIONS_COLLECTION } from "./firebase";
 
 // ---------- helpers ----------
 
@@ -46,9 +47,63 @@ function uploadWithProgress(storageRef, file, onProgress) {
 
 // ---------- sessions ----------
 
-// Creates the session placeholder doc, then uploads the audio. The Storage
-// finalize trigger (functions/processSession) picks it up from there; the
-// UI just subscribes to the doc.
+// The server pipeline runs in callable Cloud Functions. They keep running
+// after the browser closes; the UI just follows the session doc.
+const transcribeSessionFn = httpsCallable(functions, "transcribeSession", { timeout: 70000 });
+const analyzeSessionFn = httpsCallable(functions, "analyzeSession", { timeout: 70000 });
+
+// Fires a callable without tying the UI to its (minutes-long) completion.
+// The function reports progress/errors into the session doc itself; a
+// client-side invocation failure just leaves the doc stale, which the UI
+// detects and offers to retry.
+function invokePipeline(fn, payload, label) {
+  fn(payload).catch((err) => {
+    // "deadline-exceeded" here only means the *client* stopped waiting for
+    // the response; the function keeps running server-side.
+    if (err?.code !== "functions/deadline-exceeded") {
+      console.error(`${label} invocation failed:`, err);
+    }
+  });
+}
+
+export function requestTranscription(sessionId) {
+  invokePipeline(transcribeSessionFn, { sessionId }, "transcribeSession");
+}
+
+export function requestAnalysis(sessionId, mapping) {
+  invokePipeline(analyzeSessionFn, { sessionId, mapping }, "analyzeSession");
+}
+
+// Retry a stuck or failed session at the right stage.
+export async function retrySession(session) {
+  if (session.transcriptPath && session.confirmedMapping) {
+    requestAnalysis(session.id, session.confirmedMapping);
+    return "analyzing";
+  }
+  if (session.transcriptPath) {
+    // Transcript exists but mapping was never confirmed: reopen the mapping step.
+    await updateDoc(doc(db, SESSIONS_COLLECTION, session.id), {
+      status: "needs_mapping",
+      error: null,
+      errorStage: null,
+      updatedAt: new Date().toISOString(),
+    });
+    return "needs_mapping";
+  }
+  requestTranscription(session.id);
+  return "transcribing";
+}
+
+// Reopen the mapping step from a draft (e.g. a voice was misassigned).
+export async function reopenMapping(sessionId) {
+  await updateDoc(doc(db, SESSIONS_COLLECTION, sessionId), {
+    status: "needs_mapping",
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+// Creates the session placeholder doc, uploads the audio, then kicks off
+// the transcription function.
 export async function startSessionUpload(file, onProgress) {
   const sessionRef = doc(collection(db, SESSIONS_COLLECTION));
   const audioPath = `recordings/${sessionRef.id}/${file.name}`;
@@ -66,18 +121,20 @@ export async function startSessionUpload(file, onProgress) {
     const audioUrl = await uploadWithProgress(ref(storage, audioPath), file, onProgress);
     await updateDoc(sessionRef, {
       audioUrl,
-      status: "processing",
+      status: "queued",
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {
     await updateDoc(sessionRef, {
       status: "error",
+      errorStage: "upload",
       error: `Upload failed: ${err.message}`,
       updatedAt: new Date().toISOString(),
     }).catch(() => {});
     throw err;
   }
 
+  requestTranscription(sessionRef.id);
   return sessionRef.id;
 }
 

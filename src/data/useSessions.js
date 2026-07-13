@@ -12,9 +12,29 @@ import { ref, getDownloadURL } from "firebase/storage";
 import { db, storage, SESSIONS_COLLECTION } from "./firebase";
 
 // Legacy docs (pre-pipeline) have no status field: they were saved fully
-// analyzed, so they behave as published.
+// analyzed, so they behave as published. "processing" is the retired status
+// from the storage-trigger era; treat it as queued so it can be retried.
 export function sessionStatus(session) {
-  return session?.status || "published";
+  const status = session?.status || "published";
+  return status === "processing" ? "queued" : status;
+}
+
+// A session is stale when a working status has not been touched for longer
+// than plausible. Thresholds match the server: the function refuses to
+// re-enter transcribing/analyzing until its 90-minute lock expires.
+const STALE_MS = {
+  uploading: 15 * 60 * 1000,
+  queued: 15 * 60 * 1000,
+  transcribing: 90 * 60 * 1000,
+  analyzing: 90 * 60 * 1000,
+};
+
+export function isSessionStale(session) {
+  const status = sessionStatus(session);
+  const threshold = STALE_MS[status];
+  if (!threshold) return false;
+  const lastTouch = new Date(session.updatedAt || session.createdAt || 0).getTime();
+  return Date.now() - lastTouch > threshold;
 }
 
 // Live subscription to a single session doc — this is how the UI follows
@@ -78,13 +98,14 @@ export async function fetchSessionById(sessionId) {
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
 
-// Full diarized transcript, fetched on demand. New sessions store it as a
-// text file in Storage; legacy docs carry it inline.
+// Full diarized transcript, fetched on demand. Prefer the named version
+// (real member names); fall back to the anonymous one, then legacy inline.
 export async function fetchTranscript(session) {
   if (!session) return "";
   if (session.transcript) return session.transcript; // legacy inline
-  if (!session.transcriptPath) return "";
-  const url = await getDownloadURL(ref(storage, session.transcriptPath));
+  const path = session.namedTranscriptPath || session.transcriptPath;
+  if (!path) return "";
+  const url = await getDownloadURL(ref(storage, path));
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Transcript download failed (${res.status})`);
   return res.text();

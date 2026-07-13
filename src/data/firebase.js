@@ -1,7 +1,8 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getFunctions } from "firebase/functions";
 
 // All values come from .env (VITE_*). Firebase web config is public by
 // design, but we keep it out of the source tree anyway.
@@ -22,9 +23,15 @@ if (!firebaseConfig.apiKey) {
 
 const app = initializeApp(firebaseConfig);
 
-export const db = getFirestore(app);
+// Auto-detect long polling: some networks/browsers silently break Firestore's
+// WebChannel transport right after login, leaving listeners hanging forever.
+export const db = initializeFirestore(app, {
+  experimentalAutoDetectLongPolling: true,
+});
 export const storage = getStorage(app);
 export const auth = getAuth(app);
+// Cloud Functions region must match functions/index.js CALL_OPTS.
+export const functions = getFunctions(app, "europe-west1");
 
 // Plain Google sign-in. No extra OAuth scopes: the AI pipeline runs in a
 // Cloud Function with its own service account, so the browser never needs

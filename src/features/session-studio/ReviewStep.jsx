@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Sparkles, Volume2, Check, AlertTriangle, User } from 'lucide-react';
 import { renderMarkdown } from '../../utils/markdown';
-import { publishSessionAsNewBook, publishSessionToBook, updateSessionDraft } from '../../data/mutations';
+import { publishSessionAsNewBook, publishSessionToBook, updateSessionDraft, reopenMapping } from '../../data/mutations';
 
 // Human-in-the-loop review of a pipeline draft: the admin corrects what the
 // AI produced (metadata, grades, session memory) and blesses it into a book
@@ -271,14 +271,29 @@ export default function ReviewStep({ session, books, onPublished, onDiscard }) {
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={onDiscard}
-          disabled={publishing}
-          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}
-        >
-          Dejar como borrador y volver
-        </button>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '1.5rem' }}>
+          <button
+            type="button"
+            onClick={onDiscard}
+            disabled={publishing}
+            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}
+          >
+            Dejar como borrador y volver
+          </button>
+          {session.detectedSpeakers?.length > 0 && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (!window.confirm('¿Volver al paso de asignación de voces? El análisis se regenerará con la nueva asignación.')) return;
+                await reopenMapping(session.id);
+              }}
+              disabled={publishing}
+              style={{ background: 'none', border: 'none', color: 'var(--primary-ink)', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              Corregir asignación de voces
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

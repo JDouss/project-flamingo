@@ -1,29 +1,25 @@
-# Deployment Guide — Serverless Pipeline
+# Deployment Guide — Serverless Pipeline (callable, two stages)
 
-One-time setup after the architecture refactor. Commands run from the repo root with the Firebase CLI (`npm i -g firebase-tools`, `firebase login`).
+Setup after the architecture refactor + pipeline v2. Commands run from the repo root with the Firebase CLI (`firebase login`).
+
+> **Why your session got stuck on 2026-07-12:** the Cloud Function was never deployed (`firebase functions:list` returned empty), so the uploaded audio had nothing processing it. Pipeline v2 also removes the design flaws that would have bitten later: Storage triggers cap at 9 min (too short for 2h audio) and have no retry path. The pipeline is now two callable functions with 60-min timeouts and an explicit retry button in the UI.
 
 ## 1. Upgrade to the Blaze plan (required for Cloud Functions)
 
 Console → https://console.firebase.google.com/project/project-flamingo-497112/usage/details → **Modify plan → Blaze**.
-Expected real cost: **0 €** at club volume (everything fits the free tier; Gemini calls are cents/session on the API key's own billing).
+Expected real cost: **0 €** at club volume. Set a 5 €/month budget alert in GCP Billing as a safety belt.
 
-**Set a budget alert** (belt and suspenders): GCP Console → Billing → Budgets & alerts → create a 5 €/month budget for the project.
+## 2. Rotate the old exposed API keys (if not done yet)
 
-## 2. Rotate the old exposed API keys
-
-The previous frontend embedded `VITE_GEMINI_API_KEY` and `VITE_GCP_API_KEY` in the deployed JS bundle, so treat them as public:
-
-- GCP Console → APIs & Services → Credentials → delete (or regenerate) both keys.
-- Create **one new Gemini API key** (AI Studio → https://aistudio.google.com/apikey). It will only ever live in Secret Manager.
+The pre-refactor frontend embedded `VITE_GEMINI_API_KEY` and `VITE_GCP_API_KEY` in deployed bundles — treat them as public. Delete/regenerate in GCP Console → Credentials, and create one new Gemini key (https://aistudio.google.com/apikey).
 
 ## 3. Store the Gemini key as a function secret
 
 ```powershell
 firebase functions:secrets:set GEMINI_API_KEY
-# paste the new key when prompted
 ```
 
-## 4. Deploy rules + functions + hosting
+## 4. Deploy everything
 
 ```powershell
 cd functions; npm install; cd ..
@@ -34,25 +30,39 @@ firebase deploy --only hosting
 ```
 
 Notes:
-- The function `processSession` deploys to `europe-west1` with 1 GiB / 540 s. First deploy may ask to enable Cloud Build, Eventarc and Artifact Registry APIs — accept.
-- The Storage trigger listens on the default bucket; recordings upload to `recordings/{sessionId}/{file}`.
-- Firestore/Storage rules whitelist admin emails **inside the rules files** — keep them in sync with `VITE_AUTHORIZED_EMAILS` when members change.
+- Deploys two callables to `europe-west1`: `transcribeSession` and `analyzeSession` (1 GiB, 3600 s). First deploy may ask to enable Cloud Build / Artifact Registry — accept.
+- No Storage trigger anymore: the SPA invokes the functions after upload; they keep running server-side even if the tab closes.
+- Admin emails are whitelisted in **three** places that must stay in sync: `firestore.rules`, `storage.rules`, and `ADMIN_EMAILS` in `functions/index.js`.
 
-## 5. Re-authenticate
+## 5. Rescue the stuck session from 2026-07-12
 
-The `cloud-platform` OAuth scope is gone. Everyone must simply log out / log in once; no GCP token is stored in the browser anymore.
+After deploying: open the app → **Sesión de Club → Historial de sesiones**. The old session will show **"Atascada — necesita reintento"** → click **Ver problema → Reintentar procesado**. It will re-enter the pipeline from the transcription stage (the audio is already in Storage; no re-upload needed).
 
-## 6. End-to-end verification
+## 6. Pipeline flow (what to expect)
 
-1. Log in as admin → **Sesión de Club** → upload `las_uvas_de_la_ira_7min.mp3` (repo root).
-2. When the upload hits 100 %, close the tab. Watch progress with `firebase functions:log` if curious.
-3. Reopen the app → Sesión de Club → **Historial de sesiones**: the session should show *Borrador — pendiente de revisión* within a few minutes.
-4. **Revisar y publicar** → check the deduced title/author, grades and session memory → *Publicar como nueva reseña*.
-5. Open the new book card: session memory, grades chart, audio player, and lazy-loaded transcript should all render. The star rating should equal `round(avg(final grades)/2)`.
-6. Negative paths: upload a `.m4a` (client rejects it); log out and confirm Firestore writes fail (rules).
+```
+Subir audio  →  queued  →  transcribing        (Gemini, anonymous [Speaker N] tags)
+             →  needs_mapping                  (HUMAN: confirm who each voice is;
+                                                AI suggestions pre-filled with confidence)
+             →  analyzing                      (Gemini, names locked; grades validated
+                                                against confirmed participants only)
+             →  draft                          (HUMAN: review + publish)
+             →  published
+```
+
+Any stage can fail or stall → the session shows an error/stale badge in the history with a retry that resumes from the right stage. Correcting a bad voice assignment later: open the draft → "Corregir asignación de voces" → re-analyze.
+
+## 7. End-to-end verification
+
+1. Log in → Sesión de Club → upload `las_uvas_de_la_ira_7min.mp3`.
+2. Close the tab after the upload hits 100 %. Watch `firebase functions:log` if curious.
+3. Reopen → Historial: within minutes the session shows *Esperando asignación de voces* → **Asignar voces**.
+4. Check the AI suggestions, listen to the audio, confirm the 5 members → *analyzing* → *Borrador*.
+5. Review deduced title/grades/memory → publish → verify BookDetails (memory, grades chart, audio, transcript with real names) and the dashboard.
+6. Negative paths: `.m4a` rejected; logged-out writes blocked by rules; calling the functions without an admin token returns permission-denied.
 
 ## Data compatibility
 
-- Legacy `transcriptions` docs (no `status` field) are treated as **published**; their inline transcripts keep working in BookDetails.
-- New sessions store the transcript at `transcripts/{sessionId}.txt` in Storage and only a 1,500-char excerpt in Firestore.
-- `speakers_registry` keeps its members; the old `audioUrl`/`audioBase64` voiceprint fields are simply ignored (feature removed — GCP has no public voice-ID API). You can delete those fields whenever you like to slim the docs.
+- Legacy docs (no `status`) behave as **published**. The retired `processing` status is treated as `queued` (retryable).
+- Transcripts: `transcripts/{id}.txt` (anonymous, kept so mapping can be redone) and `transcripts/{id}_named.txt` (shown in BookDetails).
+- `speakers_registry` personas are used as hints for the AI mapping suggestions — keeping them descriptive improves suggestions, but the human confirmation is always the source of truth.
