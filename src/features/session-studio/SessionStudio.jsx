@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import UploadStep from './UploadStep';
-import MappingStep from './MappingStep';
+import GradingStep from './GradingStep';
 import ReviewStep from './ReviewStep';
 import SessionHistory from './SessionHistory';
 import MembersRegistry from './MembersRegistry';
@@ -77,8 +77,8 @@ export default function SessionStudio({ isOpen, onClose, books }) {
                 }}
                 onDiscard={resetPipeline}
               />
-            ) : session && sessionStatus(session) === 'needs_mapping' ? (
-              <MappingStep session={session} />
+            ) : session && sessionStatus(session) === 'needs_grading' ? (
+              <GradingStep session={session} />
             ) : (
               <UploadStep
                 session={session}

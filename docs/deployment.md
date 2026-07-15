@@ -45,34 +45,36 @@ After deploying: open the app → **Sesión de Club → Historial de sesiones**.
 ## 6. Pipeline flow (what to expect)
 
 ```
-Subir audio  →  queued  →  transcribing        (ffmpeg splits audio into 30-min
-                                                segments; each transcribed by Gemini
-                                                with anonymous [Speaker N] tags,
-                                                numbering carried across segments)
-             →  needs_mapping                  (HUMAN: confirm who each voice is;
-                                                AI suggestions pre-filled with confidence)
-             →  analyzing                      (Gemini, names locked; grades validated
-                                                against confirmed participants only)
+Subir audio  →  queued  →  transcribing        (ffmpeg splits audio into 15-min
+                                                segments; plain TIMESTAMPED
+                                                transcription, no speaker tags;
+                                                then a focused pass locates every
+                                                moment where a grade is spoken)
+             →  needs_grading                  (HUMAN: each grade moment has a ▶
+                                                that plays that exact second —
+                                                assign who said it, correct the
+                                                value, discard false positives,
+                                                add missing ones)
+             →  analyzing                      (human-confirmed grades ARE the
+                                                stats; Gemini writes summary +
+                                                memoria, attributing opinions only
+                                                when a name is audible)
              →  draft                          (HUMAN: review + publish)
              →  published
 ```
 
+Diarization was deliberately dropped: LLM voice-matching split the same
+person across tags and merged different people, and the club stats only need
+the GRADES to be right. Grade moments are short, timestamped utterances a
+human can verify in seconds by listening — that human confirmation is the
+single source of truth for the stats. The memoria never attributes an
+opinion to a member unless the name is audible in the conversation.
+
 Long recordings are split because a single Gemini generation over ~2 h of
 audio degenerates (`finishReason: MALFORMED_RESPONSE`), and prompting it to
 transcribe only a time window does not bound the work — it still ingests the
-whole file. Segmenting the actual audio is what keeps each generation small.
-
-Voice identity across segments is NOT trusted to the model (it cannot match
-a voice it hears now to a text quote from another API call). Instead each
-segment uses local numbering with per-turn `[mm:ss]` timestamps, and a
-text-based consolidation pass merges local voices into global speakers using
-conversation continuity across segment boundaries, self-references, and
-style. The mapping step then shows, per voice: participation stats and up to
-3 long excerpts from different moments, each with a ▶ button that seeks the
-session audio player to that exact second — identification is by listening.
-If a voice is still split in two, assigning both to the same member merges
-them (grades dedupe by name), and a "volver a transcribir" escape hatch
-re-runs the whole transcription.
+whole file. All generations retry with varied temperature (identical
+re-sends tend to repeat the same degenerate output).
 
 Any stage can fail or stall → the session shows an error/stale badge in the history with a retry that resumes from the right stage. Correcting a bad voice assignment later: open the draft → "Corregir asignación de voces" → re-analyze.
 

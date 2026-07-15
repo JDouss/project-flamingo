@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Sparkles, Volume2, Check, AlertTriangle, User } from 'lucide-react';
+import { Sparkles, Volume2, Check, AlertTriangle } from 'lucide-react';
 import { renderMarkdown } from '../../utils/markdown';
-import { publishSessionAsNewBook, publishSessionToBook, updateSessionDraft, reopenMapping } from '../../data/mutations';
+import { publishSessionAsNewBook, publishSessionToBook, updateSessionDraft, reopenGrading } from '../../data/mutations';
 
 // Human-in-the-loop review of a pipeline draft: the admin corrects what the
 // AI produced (metadata, grades, session memory) and blesses it into a book
@@ -22,7 +22,6 @@ export default function ReviewStep({ session, books, onPublished, onDiscard }) {
   const [publishing, setPublishing] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const speakers = initial.speakers || [];
   const memberNames = [...new Set([
     ...Object.keys(grades.start || {}),
     ...Object.keys(grades.end || {}),
@@ -172,32 +171,6 @@ export default function ReviewStep({ session, books, onPublished, onDiscard }) {
         </div>
       )}
 
-      {/* Speaker highlights */}
-      {speakers.length > 0 && (
-        <div style={{ margin: '1.5rem 0' }}>
-          <label className="form-label">Participantes detectados</label>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {speakers.map((sp) => (
-              <div key={sp.name} className="voice-speaker-card" style={{ border: '1px solid var(--border)' }}>
-                <div className="voice-speaker-header">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <div className="voice-speaker-avatar"><User size={16} /></div>
-                    <p style={{ fontWeight: '700', fontSize: '0.95rem', margin: 0 }}>{sp.name}</p>
-                  </div>
-                </div>
-                <div className="voice-speaker-snippet" style={{ textAlign: 'left' }}>
-                  <Volume2 size={14} style={{ color: 'var(--primary)', flexShrink: 0, marginTop: '0.2rem' }} />
-                  <span style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>“{sp.voiceSnippet}”</span>
-                </div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.5', margin: '0.5rem 0 0 0', textAlign: 'left' }}>
-                  {sp.summary}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Session memory markdown */}
       <div className="form-group" style={{ marginTop: '1.5rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
@@ -296,17 +269,17 @@ export default function ReviewStep({ session, books, onPublished, onDiscard }) {
           >
             Dejar como borrador y volver
           </button>
-          {session.detectedSpeakers?.length > 0 && (
+          {(session.gradeEvents?.length > 0 || session.confirmedGrades?.length > 0) && (
             <button
               type="button"
               onClick={async () => {
-                if (!window.confirm('¿Volver al paso de asignación de voces? El análisis se regenerará con la nueva asignación.')) return;
-                await reopenMapping(session.id);
+                if (!window.confirm('¿Volver al paso de asignación de notas? El análisis se regenerará con las notas corregidas.')) return;
+                await reopenGrading(session.id);
               }}
               disabled={publishing}
               style={{ background: 'none', border: 'none', color: 'var(--primary-ink)', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}
             >
-              Corregir asignación de voces
+              Corregir asignación de notas
             </button>
           )}
         </div>

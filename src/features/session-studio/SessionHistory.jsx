@@ -6,7 +6,7 @@ const STATUS_META = {
   uploading: { label: 'Subiendo', color: 'var(--accent-gold)', working: true },
   queued: { label: 'En cola', color: 'var(--accent-gold)', working: true },
   transcribing: { label: 'Transcribiendo', color: 'var(--accent-rock)', working: true },
-  needs_mapping: { label: 'Esperando asignación de voces', color: 'var(--accent-gold)' },
+  needs_grading: { label: 'Esperando asignación de notas', color: 'var(--accent-gold)' },
   analyzing: { label: 'Analizando', color: 'var(--accent-rock)', working: true },
   draft: { label: 'Borrador — pendiente de revisión', color: 'var(--accent-gold)' },
   published: { label: 'Publicada', color: 'var(--sage)' },
@@ -63,7 +63,7 @@ export default function SessionHistory({ books, onOpenSession }) {
             ? { label: 'Atascada — necesita reintento', color: 'var(--accent-coral)' }
             : (STATUS_META[status] || STATUS_META.published);
           const linkedBook = bookTitleFor(session);
-          const needsAttention = stale || status === 'error' || status === 'needs_mapping' || status === 'draft';
+          const needsAttention = stale || status === 'error' || status === 'needs_grading' || status === 'draft';
 
           return (
             <div key={session.id} className="voice-history-item">
@@ -85,7 +85,7 @@ export default function SessionHistory({ books, onOpenSession }) {
                   }}>
                     {stale ? <Clock size={10} /> : meta.working ? <Loader2 className="voice-spinner" size={10} /> : null}
                     {status === 'error' && !stale && <AlertTriangle size={10} />}
-                    {status === 'needs_mapping' && !stale && <Users size={10} />}
+                    {status === 'needs_grading' && !stale && <Users size={10} />}
                     {meta.label}
                   </span>
                   {status === 'error' && session.error && (
@@ -118,8 +118,8 @@ export default function SessionHistory({ books, onOpenSession }) {
                   >
                     {status === 'draft' ? (
                       <><PenLine size={13} /> Revisar y publicar</>
-                    ) : status === 'needs_mapping' ? (
-                      <><Users size={13} /> Asignar voces</>
+                    ) : status === 'needs_grading' ? (
+                      <><Users size={13} /> Asignar notas</>
                     ) : (
                       <><AlertTriangle size={13} /> Ver problema</>
                     )}

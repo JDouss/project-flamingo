@@ -1,24 +1,27 @@
 /**
  * Project Flamingo — serverless AI pipeline (callable, two stages).
  *
+ * Diarization was deliberately dropped: LLM voice-matching proved unreliable
+ * (same person split across tags, different people merged), and the club's
+ * stats only need the GRADES to be right. So the pipeline centers on that:
+ *
  * Stage 1 — transcribeSession({ sessionId }):
- *   Audio (Storage) → Gemini Files API → diarized transcript with ANONYMOUS
- *   [Speaker N] tags + a first snippet per voice + a *suggested* mapping to
- *   club members. Ends in status `needs_mapping`: a human confirms who is
- *   who before any name touches the data.
+ *   Audio (Storage, ffmpeg-split into 15-min segments) → plain TIMESTAMPED
+ *   transcript (no speaker tags) → a focused pass detects every moment in
+ *   the opening/closing stretches where someone states a book grade
+ *   (timestamp + verbatim quote + value + suggested member when a name is
+ *   audible nearby). Ends in status `needs_grading`.
  *
- * Stage 2 — analyzeSession({ sessionId, mapping }):
- *   Applies the confirmed mapping to the transcript, then runs the
- *   structured analysis (summary, start/end grades per member, session
- *   memory). Extracted grades are validated against the confirmed
- *   participant list so misheard names can never pollute the club stats.
- *   Ends in status `draft` for final review in the SPA.
+ * Stage 2 — analyzeSession({ sessionId, grades }):
+ *   Receives the HUMAN-confirmed grade list (member/round/value — the human
+ *   listened to each moment in the UI and assigned it). Those are the stats,
+ *   verbatim. Gemini then writes the general summary + session memory from
+ *   the transcript, attributing opinions to members ONLY when a name is
+ *   audible in the conversation. Ends in status `draft`.
  *
- * Both are HTTPS callables (not Storage triggers) on purpose:
- *   - 3600s timeout (event triggers cap at 540s — too short for 2h audio)
- *   - they keep running server-side if the browser closes after invoking
- *   - either stage can be re-invoked to retry a stuck/failed session
- *   - no Eventarc/bucket-region coupling at deploy time
+ * Both are HTTPS callables (3600s, retryable, keep running if the browser
+ * closes). All generations retry with varied temperature: MALFORMED_RESPONSE
+ * is stochastic degeneration and identical re-sends tend to repeat it.
  */
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
@@ -34,12 +37,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import ffmpegPath from "ffmpeg-static";
 
-// Node's built-in fetch aborts after undici's default 300s headers timeout.
-// Transcribing a 2-hour recording (non-streaming) keeps Gemini busy far
-// longer than that before the response starts, so we use undici's fetch with
-// the header/body timeouts disabled — the function's own 3600s timeout is the
-// real ceiling. `connectTimeout` stays finite so genuine network failures
-// still surface quickly.
+// Node's built-in fetch aborts after undici's default 300s headers timeout,
+// which long Gemini generations exceed. Disable header/body timeouts — the
+// function's own 3600s timeout is the real ceiling.
 setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 60_000 }));
 
 initializeApp();
@@ -56,8 +56,7 @@ const ADMIN_EMAILS = ["doussinague95@gmail.com"];
 
 const CALL_OPTS = {
   region: "europe-west1",
-  // 2 GiB: the function splits the audio with ffmpeg into /tmp (tmpfs, counts
-  // against memory) and buffers segments before uploading them to Gemini.
+  // 2 GiB: ffmpeg writes segments to /tmp (tmpfs counts against memory).
   memory: "2GiB",
   timeoutSeconds: 3600,
   secrets: [geminiApiKey],
@@ -186,37 +185,8 @@ async function generateContent(parts, apiKey, generationConfig = {}) {
   return text;
 }
 
-// ---------------------------------------------------------------------------
-// Stage 1 — transcription with anonymous diarization
-// ---------------------------------------------------------------------------
-
-// A single generation over a 2h recording degenerates (MALFORMED_RESPONSE),
-// and asking Gemini to transcribe "only minute X to Y" of a long file does
-// NOT bound the work — it still ingests the whole upload. So we physically
-// split the audio with ffmpeg and transcribe each piece separately. 15-min
-// segments keep each generation short (~4k output tokens): degeneration is
-// rarer and a failed retry is cheap.
-const CHUNK_SECONDS = 900; // 15-minute segments
-
-function buildSegmentPrompt(memberCount, segmentIndex, segmentCount) {
-  return `Este es el fragmento ${segmentIndex + 1} de ${segmentCount} de la grabación de una sesión de un club de lectura en español. Transcríbelo ÍNTEGRAMENTE y de forma literal.
-
-Formato de cada intervención (una línea por turno de palabra):
-[mm:ss] [Speaker N]: texto
-donde mm:ss es el minuto y segundo DENTRO DE ESTE FRAGMENTO en que empieza el turno.
-
-Reglas de diarización:
-- Numera las voces de este fragmento por orden de aparición: [Speaker 1], [Speaker 2], ...
-- En la sala suele haber ${memberCount || 5} personas. NO crees una etiqueta nueva salvo que oigas una voz CLARAMENTE distinta; ante la duda, reutiliza la etiqueta existente más parecida.
-- La misma voz debe llevar SIEMPRE la misma etiqueta durante todo el fragmento (fíjate en el timbre, no en el tema).
-- Sin markdown, sin nombres propios en las etiquetas.
-
-Devuelve ÚNICAMENTE la transcripción, empezando directamente por la primera intervención.`;
-}
-
 // Retries VARY the sampling temperature: an identical re-send tends to fall
-// into the same degenerate mode (that's why MALFORMED_RESPONSE survived 3
-// identical attempts); changing the temperature breaks the pattern.
+// into the same degenerate mode; changing the temperature breaks the pattern.
 const RETRY_TEMPERATURES = [0.7, 1.0, 0.3, 1.3];
 
 async function generateChunkWithRetry(parts, apiKey, tries = 4) {
@@ -232,6 +202,90 @@ async function generateChunkWithRetry(parts, apiKey, tries = 4) {
     }
   }
   throw lastErr;
+}
+
+async function generateJsonWithRetry(prompt, schema, apiKey, tries = 3) {
+  let lastErr;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    const temperature = RETRY_TEMPERATURES[(attempt - 1) % RETRY_TEMPERATURES.length];
+    try {
+      const raw = await generateContent([{ text: prompt }], apiKey, {
+        responseMimeType: "application/json",
+        responseSchema: schema,
+        temperature,
+      });
+      return JSON.parse(raw);
+    } catch (err) {
+      lastErr = err;
+      logger.warn(`JSON generation attempt ${attempt}/${tries} (temp ${temperature}) failed: ${err.message}`);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  throw lastErr;
+}
+
+// ---------------------------------------------------------------------------
+// Stage 1 — timestamped transcription (no diarization) in ffmpeg segments
+// ---------------------------------------------------------------------------
+
+// 15-min segments keep each generation short: degeneration is rarer and a
+// failed retry is cheap. (Prompting Gemini to transcribe "only minute X-Y"
+// of a long upload does NOT bound the work — hence real audio splitting.)
+const CHUNK_SECONDS = 900;
+
+function buildSegmentPrompt(segmentIndex, segmentCount) {
+  return `Este es el fragmento ${segmentIndex + 1} de ${segmentCount} de la grabación de una sesión de un club de lectura en español. Transcríbelo ÍNTEGRAMENTE y de forma literal.
+
+Formato: párrafos cortos, cada uno empezando con el minuto y segundo DENTRO DE ESTE FRAGMENTO en que empieza:
+[mm:ss] texto de lo que se dice
+
+Reglas:
+- Empieza un párrafo nuevo cada vez que cambie quien habla o cambie el tema (párrafos de 1-4 frases).
+- NO intentes identificar ni etiquetar a los hablantes; solo transcribe lo dicho.
+- Sin markdown. Transcripción literal, con puntuación correcta.
+
+Devuelve ÚNICAMENTE la transcripción, empezando directamente por el primer párrafo.`;
+}
+
+// "[mm:ss] text" (or hh:mm:ss, optional brackets/parens) at line start.
+const TS_LINE = /^\s*(?:[-*>]\s*)?\[?\(?(\d{1,2}):(\d{2})(?::(\d{2}))?\)?\]?\s*[:\-–—]?\s*(.*)$/;
+
+function tsToSeconds(a, b, c) {
+  if (a === undefined) return null;
+  return c !== undefined
+    ? Number(a) * 3600 + Number(b) * 60 + Number(c)
+    : Number(a) * 60 + Number(b);
+}
+
+function fmtTime(totalSec) {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = Math.floor(totalSec % 60);
+  return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
+// Parse one segment's raw transcript into { t (absolute seconds), text }
+// entries. Untimestamped lines are appended to the current entry.
+function parseSegment(raw, segIndex) {
+  const entries = [];
+  for (const line of raw.split("\n")) {
+    const m = line.match(TS_LINE);
+    if (m && m[4] !== undefined && m[1] !== undefined) {
+      const rel = tsToSeconds(m[1], m[2], m[3]);
+      const text = m[4].replace(/^[*_\s]+/, "").trim();
+      if (text) entries.push({ t: segIndex * CHUNK_SECONDS + rel, text });
+    } else {
+      const cont = line.trim();
+      if (!cont) continue;
+      if (entries.length > 0) {
+        entries[entries.length - 1].text += " " + cont;
+      } else {
+        // Preamble without timestamp: keep it, anchored at segment start.
+        entries.push({ t: segIndex * CHUNK_SECONDS, text: cont });
+      }
+    }
+  }
+  return entries;
 }
 
 // Split an audio buffer into ~CHUNK_SECONDS segments using a stream copy (no
@@ -273,13 +327,9 @@ async function splitAudio(buffer, ext) {
   }
 }
 
-// Transcribe the whole recording segment by segment. Each segment uses its
-// own LOCAL speaker numbering — carrying voice identity across separate API
-// calls via text hints is unreliable (a model cannot match a voice it hears
-// now to a quote from another call), so unification happens afterwards in a
-// dedicated text-based consolidation pass. Returns the parsed turn entries
-// ({label, t, text}), or null if the audio could not be split.
-async function transcribeInSegments(buffer, ext, mimeType, apiKey, memberCount, onProgress) {
+// Transcribe the whole recording segment by segment; returns { t, text }
+// entries, or null if the audio could not be split (caller falls back).
+async function transcribeInSegments(buffer, ext, mimeType, apiKey, onProgress) {
   let split;
   try {
     split = await splitAudio(buffer, ext);
@@ -300,18 +350,14 @@ async function transcribeInSegments(buffer, ext, mimeType, apiKey, memberCount, 
         const raw = await generateChunkWithRetry(
           [
             { file_data: { file_uri: geminiFile.uri, mime_type: mimeType } },
-            { text: buildSegmentPrompt(memberCount, i, total) },
+            { text: buildSegmentPrompt(i, total) },
           ],
           apiKey
         );
         const segEntries = parseSegment(raw, i);
-        if (segEntries.length === 0) {
-          logger.warn(`Segment ${i + 1}/${total} produced no speaker tags; raw starts: ${raw.slice(0, 300)}`);
-          if (i === 0) {
-            throw new Error(
-              "La transcripción se generó pero no se reconocieron etiquetas de hablante en el primer fragmento. Revisa los logs de la función."
-            );
-          }
+        if (segEntries.length === 0 && i === 0) {
+          logger.error(`First segment produced no text. Raw starts:\n${raw.slice(0, 500)}`);
+          throw new Error("La transcripción del primer fragmento llegó vacía. Revisa los logs de la función.");
         }
         entries.push(...segEntries);
       } finally {
@@ -325,229 +371,85 @@ async function transcribeInSegments(buffer, ext, mimeType, apiKey, memberCount, 
   }
 }
 
-const SUGGESTION_SCHEMA = {
+// ---------------------------------------------------------------------------
+// Grade-moment detection (the heart of the pipeline)
+// ---------------------------------------------------------------------------
+
+const GRADE_EVENTS_SCHEMA = {
   type: "object",
   properties: {
-    suggestions: {
+    events: {
       type: "array",
       items: {
         type: "object",
         properties: {
-          speaker: { type: "string" },
-          memberName: { type: "string", nullable: true },
-          confidence: { type: "string", enum: ["alta", "media", "baja"] },
-          reason: { type: "string" },
+          round: { type: "string", enum: ["start", "end"] },
+          timestamp: { type: "string" },
+          quote: { type: "string" },
+          value: { type: "number", nullable: true },
+          suggestedMember: { type: "string", nullable: true },
         },
-        required: ["speaker", "confidence", "reason"],
+        required: ["round", "timestamp", "quote"],
       },
     },
   },
-  required: ["suggestions"],
+  required: ["events"],
 };
 
-function buildSuggestionPrompt(transcript, members) {
-  const roster = members
-    .map((m) => `- ${m.name}: ${m.persona || "sin descripción"}`)
-    .join("\n");
-  return `Esta es la transcripción diarizada de una sesión de un club de lectura, con hablantes anónimos [Speaker N].
+function buildGradeEventsPrompt(head, tail, members) {
+  const roster = members.map((m) => m.name).join(", ");
+  return `RITUAL DE NOTAS de un club de lectura: en cada sesión, cada miembro puntúa el libro de 1 a 10 DOS veces — una RONDA INICIAL cerca del principio del debate y una RONDA FINAL cerca del final.
 
-Miembros habituales del club:
-${roster}
+Abajo tienes el TRAMO INICIAL y el TRAMO FINAL de la transcripción (con marcas de tiempo [hh:mm:ss] por párrafo). Localiza CADA momento en que alguien dice su nota:
 
-Para cada Speaker, sugiere qué miembro es MÁS probable que sea, usando SOLO pistas del contenido: cómo se llaman entre ellos ("¿tú qué opinas, X?"), autorreferencias, y el estilo de análisis descrito en su perfil. Si no hay pistas suficientes, memberName debe ser null y confidence "baja". No inventes.
+- round: "start" si el momento está en el TRAMO INICIAL, "end" si está en el TRAMO FINAL.
+- timestamp: copia EXACTAMENTE la marca [hh:mm:ss] del párrafo donde se dice la nota.
+- quote: la frase textual donde se dice la nota.
+- value: la nota como número ("un ocho y medio" = 8.5, "entre 7 y 8" = 7.5, "nueve" = 9); null si dice que puntúa pero el número no queda claro.
+- suggestedMember: SOLO si en la conversación cercana se oye claramente el nombre de quien habla (p. ej. "Jaime, ¿tu nota?" justo antes). Debe ser uno de: ${roster}. En caso contrario null — NO adivines.
 
-Transcripción:
+Incluye un evento por CADA nota que se diga, aunque haya varias muy seguidas. No inventes eventos: si una ronda no aparece en el texto, devuelve solo los eventos reales.
+
+TRAMO INICIAL:
 """
-${transcript}
+${head}
+"""
+
+TRAMO FINAL:
+"""
+${tail}
 """`;
 }
 
-// Detects a diarized turn at the start of a line, tolerating the ways an LLM
-// tends to drift from the requested "[mm:ss] [Speaker N]:" format: missing
-// brackets, markdown bold, Spanish label words, a leading bullet, and the
-// timestamp before OR after the speaker tag (or absent).
-// Groups: 1-3 leading timestamp, 4 speaker number, 5-7 trailing timestamp,
-// 8 spoken text.
-const TS_PART = String.raw`\[?\(?(\d{1,2}):(\d{2})(?::(\d{2}))?\)?\]?`;
-const SPEAKER_LINE = new RegExp(
-  String.raw`^\s*(?:[-*>]\s*)?(?:${TS_PART}\s*)?` +
-    String.raw`\*{0,2}_{0,2}\[?\s*(?:speaker|hablante|interlocutor|orador|participante|persona|voz)\s*(\d+)\s*\]?_{0,2}\*{0,2}` +
-    String.raw`\s*(?:${TS_PART})?` +
-    String.raw`\s*[:\.\-–—)]\s*(.*)$`,
-  "i"
-);
-
-function tsToSeconds(a, b, c) {
-  if (a === undefined) return null;
-  // Two components = mm:ss (segments are 30 min); three = hh:mm:ss.
-  return c !== undefined
-    ? Number(a) * 3600 + Number(b) * 60 + Number(c)
-    : Number(a) * 60 + Number(b);
+function parseEventTimestamp(str) {
+  const m = String(str || "").match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return null;
+  return tsToSeconds(m[1], m[2], m[3]);
 }
 
-function fmtTime(totalSec) {
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = Math.floor(totalSec % 60);
-  return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
-}
-
-// Parse one segment's raw transcript into turn entries with segment-local
-// voice labels ("F2-S1" = fragment 2, its Speaker 1) and ABSOLUTE seconds
-// (segment offset + in-segment timestamp; null if the model omitted it).
-// Continuation lines are appended to the current turn so no dialogue is lost.
-function parseSegment(raw, segIndex) {
-  const entries = [];
-  for (const line of raw.split("\n")) {
-    const m = line.match(SPEAKER_LINE);
-    if (m) {
-      const rel = tsToSeconds(m[1], m[2], m[3]) ?? tsToSeconds(m[5], m[6], m[7]);
-      const text = m[8].replace(/^[*_\s]+/, "").trim();
-      entries.push({
-        label: `F${segIndex + 1}-S${m[4]}`,
-        t: rel === null ? null : segIndex * CHUNK_SECONDS + rel,
-        text,
-      });
-    } else if (entries.length > 0) {
-      const cont = line.trim();
-      if (cont) entries[entries.length - 1].text += " " + cont;
-    }
-  }
-  return entries;
-}
-
-// ---------------------------------------------------------------------------
-// Voice consolidation: merge segment-local voices into global speakers
-// ---------------------------------------------------------------------------
-
-const CONSOLIDATION_SCHEMA = {
-  type: "object",
-  properties: {
-    clusters: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          voices: { type: "array", items: { type: "string" } },
-          rationale: { type: "string" },
-        },
-        required: ["voices"],
-      },
-    },
-  },
-  required: ["clusters"],
-};
-
-function buildConsolidationPrompt(transcript, labels, memberCount) {
-  return `La siguiente transcripción de una sesión de un club de lectura se generó por fragmentos de audio independientes. Cada etiqueta de voz es LOCAL a su fragmento (F2-S1 = fragmento 2, su hablante 1), así que la misma persona real aparece con etiquetas distintas en fragmentos distintos, y a veces una voz se dividió en dos etiquetas dentro del mismo fragmento.
-
-Tu tarea: agrupa las etiquetas que correspondan a la MISMA persona real.
-
-Pistas que debes usar:
-- Continuidad de la conversación en las fronteras entre fragmentos (quien hablaba al final de un fragmento suele seguir al principio del siguiente).
-- Cómo se llaman entre ellos y autorreferencias ("como decía antes yo...").
-- Estilo de análisis, opiniones sostenidas y muletillas de cada persona.
-
-Reglas:
-- En la sala suele haber ${memberCount || 5} personas; el número de grupos debe rondar esa cifra (nunca puede haber más grupos que personas plausibles, pero fusiona SOLO con evidencia).
-- Cada etiqueta debe aparecer en EXACTAMENTE un grupo. Etiquetas: ${labels.join(", ")}.
-
-Transcripción:
-"""
-${transcript}
-"""`;
-}
-
-// Returns a Map label -> global speaker number (1..K, ordered by first
-// appearance). Falls back to one-group-per-label if the pass fails.
-async function consolidateVoices(entries, memberCount, apiKey) {
-  const labels = [...new Set(entries.map((e) => e.label))];
-  const identity = () => new Map(labels.map((l, i) => [l, i + 1]));
-  if (labels.length <= 1) return identity();
-
-  const firstIdx = new Map();
-  entries.forEach((e, i) => {
-    if (!firstIdx.has(e.label)) firstIdx.set(e.label, i);
-  });
-
-  try {
-    let text = entries.map((e) => `[${e.label}]: ${e.text}`).join("\n");
-    if (text.length > 300000) text = text.slice(0, 300000);
-    const raw = await generateContent(
-      [{ text: buildConsolidationPrompt(text, labels, memberCount) }],
-      apiKey,
-      { responseMimeType: "application/json", responseSchema: CONSOLIDATION_SCHEMA }
-    );
-    const { clusters } = JSON.parse(raw);
-
-    const groups = (clusters || [])
-      .map((c) => (c.voices || []).filter((v) => labels.includes(v)))
-      .filter((g) => g.length > 0);
-    groups.sort(
-      (g1, g2) =>
-        Math.min(...g1.map((v) => firstIdx.get(v))) - Math.min(...g2.map((v) => firstIdx.get(v)))
-    );
-
-    const map = new Map();
-    let k = 0;
-    for (const g of groups) {
-      k += 1;
-      for (const v of g) if (!map.has(v)) map.set(v, k);
-    }
-    for (const l of labels) if (!map.has(l)) map.set(l, ++k);
-    logger.info(`Consolidated ${labels.length} local voices into ${k} speakers.`);
-    return map;
-  } catch (err) {
-    logger.warn(`Voice consolidation failed (${err.message}); keeping per-segment voices.`);
-    return identity();
-  }
-}
-
-// Per-speaker evidence for the human mapping step: participation stats and
-// up to 3 long excerpts spread across the session, each with its timestamp
-// so the UI can seek the audio player to that exact moment.
-function buildSpeakerEvidence(entries) {
-  const byNum = new Map();
-  let totalWords = 0;
-  entries.forEach((e, idx) => {
-    const words = e.text.split(/\s+/).filter(Boolean).length;
-    totalWords += words;
-    if (!byNum.has(e.num)) byNum.set(e.num, []);
-    byNum.get(e.num).push({ ...e, words, idx });
-  });
-
-  const speakers = [...byNum.keys()].sort((a, b) => a - b).map((n) => `Speaker ${n}`);
-  const stats = {};
-  const excerpts = {};
-  const snippets = {};
-
-  for (const [num, turns] of byNum) {
-    const tag = `Speaker ${num}`;
-    const words = turns.reduce((s, t) => s + t.words, 0);
-    stats[tag] = {
-      turns: turns.length,
-      wordShare: totalWords ? Math.round((words / totalWords) * 100) : 0,
-    };
-
-    // Longest turns, at least ~5 minutes apart so they sample different
-    // moments of the session (fall back to turn index when no timestamp).
-    const pos = (t) => (t.t !== null && t.t !== undefined ? t.t : t.idx * 30);
-    const picked = [];
-    for (const turn of [...turns].sort((a, b) => b.words - a.words)) {
-      if (picked.length >= 3) break;
-      if (picked.some((p) => Math.abs(pos(p) - pos(turn)) < 300)) continue;
-      picked.push(turn);
-    }
-    picked.sort((a, b) => pos(a) - pos(b));
-
-    excerpts[tag] = picked.map((p) => ({
-      t: p.t ?? null,
-      text: p.text.length > 280 ? p.text.slice(0, 280) + "…" : p.text,
-    }));
-    snippets[tag] = excerpts[tag][0]?.text || "Intervención breve.";
-  }
-
-  return { speakers, stats, excerpts, snippets };
+async function detectGradeEvents(canonical, members, apiKey) {
+  const head = canonical.slice(0, 24000);
+  const tail = canonical.slice(-32000);
+  const result = await generateJsonWithRetry(
+    buildGradeEventsPrompt(head, tail, members),
+    GRADE_EVENTS_SCHEMA,
+    apiKey
+  );
+  const validNames = new Set(members.map((m) => m.name));
+  const events = (result.events || [])
+    .map((e) => ({
+      round: e.round === "end" ? "end" : "start",
+      t: parseEventTimestamp(e.timestamp),
+      quote: String(e.quote || "").slice(0, 300),
+      value:
+        e.value !== null && e.value !== undefined && Number(e.value) >= 1 && Number(e.value) <= 10
+          ? Number(e.value)
+          : null,
+      suggestedMember: validNames.has(e.suggestedMember) ? e.suggestedMember : null,
+    }))
+    .filter((e) => e.quote);
+  events.sort((a, b) => (a.t ?? 0) - (b.t ?? 0));
+  return events;
 }
 
 export const transcribeSession = onCall(CALL_OPTS, async (request) => {
@@ -578,17 +480,13 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
     const ext = data.audioPath.toLowerCase().split(".").pop();
     const mimeType = MIME_BY_EXT[ext] || "audio/mp3";
 
-    const membersSnap = await db.collection(MEMBERS_COLLECTION).get();
-    const members = membersSnap.docs.map((d) => d.data());
-
     const touchLock = (note) =>
       ref.update({ status: "transcribing", progressNote: note, updatedAt: new Date().toISOString() });
 
     logger.info(`Session ${ref.id}: transcribing (${buffer.length} bytes) by segments`);
-    let entries = await transcribeInSegments(buffer, ext, mimeType, apiKey, members.length, touchLock);
+    let entries = await transcribeInSegments(buffer, ext, mimeType, apiKey, touchLock);
 
-    // Fallback: ffmpeg unavailable/failed — transcribe the whole file in one
-    // call (works for short recordings; long ones may hit MALFORMED_RESPONSE).
+    // Fallback: ffmpeg unavailable — single call (fine for short recordings).
     if (entries === null) {
       logger.info(`Session ${ref.id}: single-file transcription fallback`);
       const geminiFile = await uploadToGeminiFiles(buffer, mimeType, data.audioName || "session-audio", apiKey);
@@ -596,62 +494,32 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
         const raw = await generateChunkWithRetry(
           [
             { file_data: { file_uri: geminiFile.uri, mime_type: mimeType } },
-            { text: buildSegmentPrompt(members.length, 0, 1) },
+            { text: buildSegmentPrompt(0, 1) },
           ],
           apiKey
         );
         entries = parseSegment(raw, 0);
-        if (entries.length === 0) {
-          logger.error(`Session ${ref.id}: no speaker tags recognized. Raw starts:\n${raw.slice(0, 800)}`);
-        }
       } finally {
         deleteGeminiFile(geminiFile.name, apiKey);
       }
     }
 
     if (entries.length === 0) {
-      throw new Error(
-        "La transcripción se generó pero no se reconocieron etiquetas de hablante. Revisa los logs de la función."
-      );
+      throw new Error("La transcripción llegó vacía. Revisa los logs de la función.");
     }
 
-    // Unify segment-local voices into global speakers, then build the
-    // canonical timestamped transcript every downstream step consumes.
-    await touchLock("unificando voces");
-    logger.info(`Session ${ref.id}: consolidating voices`);
-    const clusterMap = await consolidateVoices(entries, members.length, apiKey);
-    entries = entries.map((e) => ({ ...e, num: clusterMap.get(e.label) }));
+    const canonical = entries.map((e) => `[${fmtTime(e.t)}] ${e.text}`).join("\n");
 
-    const canonical = entries
-      .map((e) => (e.t !== null ? `[${fmtTime(e.t)}] ` : "") + `[Speaker ${e.num}]: ${e.text}`)
-      .join("\n");
+    const membersSnap = await db.collection(MEMBERS_COLLECTION).get();
+    const members = membersSnap.docs.map((d) => d.data());
 
-    const { speakers, stats, excerpts, snippets } = buildSpeakerEvidence(entries);
-    logger.info(`Session ${ref.id}: recognized ${speakers.length} speakers (${speakers.join(", ")})`);
-
-    // Suggested mapping (hint only — a human confirms it in the SPA).
-    let suggestedMapping = {};
-    try {
-      logger.info(`Session ${ref.id}: suggesting speaker mapping`);
-      const suggestionRaw = await generateContent(
-        [{ text: buildSuggestionPrompt(canonical, members) }],
-        apiKey,
-        { responseMimeType: "application/json", responseSchema: SUGGESTION_SCHEMA }
-      );
-      const { suggestions } = JSON.parse(suggestionRaw);
-      const validNames = new Set(members.map((m) => m.name));
-      for (const s of suggestions || []) {
-        if (speakers.includes(s.speaker) && s.memberName && validNames.has(s.memberName)) {
-          suggestedMapping[s.speaker] = {
-            memberName: s.memberName,
-            confidence: s.confidence,
-            reason: s.reason,
-          };
-        }
-      }
-    } catch (err) {
-      logger.warn(`Session ${ref.id}: mapping suggestion failed (non-fatal):`, err.message);
-    }
+    await touchLock("localizando notas");
+    logger.info(`Session ${ref.id}: detecting grade moments`);
+    const gradeEvents = await detectGradeEvents(canonical, members, apiKey);
+    logger.info(
+      `Session ${ref.id}: found ${gradeEvents.length} grade moment(s): ` +
+        gradeEvents.map((e) => `${e.round}@${e.t !== null ? fmtTime(e.t) : "?"}=${e.value ?? "?"}`).join(", ")
+    );
 
     const transcriptPath = `transcripts/${ref.id}.txt`;
     await bucket.file(transcriptPath).save(canonical, {
@@ -659,20 +527,16 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
     });
 
     await ref.update({
-      status: "needs_mapping",
+      status: "needs_grading",
       transcriptPath,
       transcriptExcerpt: canonical.slice(0, 1500),
-      detectedSpeakers: speakers,
-      speakerSnippets: snippets,
-      speakerExcerpts: excerpts,
-      speakerStats: stats,
-      suggestedMapping,
+      gradeEvents,
       progressNote: null,
       updatedAt: new Date().toISOString(),
     });
 
-    logger.info(`Session ${ref.id}: transcription ready, awaiting speaker mapping.`);
-    return { status: "needs_mapping", detectedSpeakers: speakers };
+    logger.info(`Session ${ref.id}: transcription ready, awaiting grade assignment.`);
+    return { status: "needs_grading", gradeEvents: gradeEvents.length };
   } catch (err) {
     await failSession(ref, "transcription", err);
     throw new HttpsError("internal", err.message || "Transcription failed.");
@@ -680,7 +544,7 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
 });
 
 // ---------------------------------------------------------------------------
-// Stage 2 — analysis with confirmed names
+// Stage 2 — analysis with human-confirmed grades
 // ---------------------------------------------------------------------------
 
 const ANALYSIS_SCHEMA = {
@@ -690,93 +554,12 @@ const ANALYSIS_SCHEMA = {
     bookAuthor: { type: "string", nullable: true },
     genre: { type: "string", nullable: true },
     generalSummary: { type: "string" },
-    grades: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          member: { type: "string" },
-          start: { type: "number", nullable: true },
-          end: { type: "number", nullable: true },
-        },
-        required: ["member"],
-      },
-    },
-    speakers: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          voiceSnippet: { type: "string" },
-          summary: { type: "string" },
-        },
-        required: ["name", "voiceSnippet", "summary"],
-      },
-    },
   },
-  required: ["generalSummary", "grades", "speakers"],
+  required: ["generalSummary"],
 };
 
-// Dedicated grades extraction. Inside the big analysis call the final round
-// of marks is a few short lines buried at the end of a ~2h transcript and
-// gets skimmed over. This focused call receives ONLY the opening and closing
-// stretches of the session (where the club's two rating rounds actually
-// happen) and must cite the verbatim sentence for every mark it reports.
-const GRADES_SCHEMA = {
-  type: "object",
-  properties: {
-    grades: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          member: { type: "string" },
-          start: { type: "number", nullable: true },
-          startQuote: { type: "string", nullable: true },
-          end: { type: "number", nullable: true },
-          endQuote: { type: "string", nullable: true },
-        },
-        required: ["member"],
-      },
-    },
-  },
-  required: ["grades"],
-};
-
-function buildGradesPrompt(head, tail, participants) {
-  return `RITUAL DE NOTAS del club de lectura: en cada sesión, cada miembro puntúa el libro de 1 a 10 DOS veces — la RONDA INICIAL ocurre cerca del principio del debate y la RONDA FINAL cerca del final (mide si el debate cambió su opinión).
-
-Participantes (usa EXACTAMENTE estos nombres): ${participants.join(", ")}.
-
-Abajo tienes el TRAMO INICIAL y el TRAMO FINAL de la transcripción. Extrae las notas de ambas rondas:
-- Las notas pueden decirse con decimales o de palabra: "un ocho y medio" = 8.5, "entre 7 y 8" = 7.5, "nueve" = 9.
-- Para CADA nota que reportes, copia en startQuote/endQuote la frase textual donde el miembro la dice.
-- Si un miembro no da nota explícita en una ronda, deja ese campo (y su quote) en null. NO inventes ni deduzcas notas de comentarios generales.
-- La nota de la ronda final debe salir del TRAMO FINAL; la inicial, del TRAMO INICIAL.
-
-TRAMO INICIAL:
-"""
-${head}
-"""
-
-TRAMO FINAL:
-"""
-${tail}
-"""`;
-}
-
-// The analysis is split in two generations on purpose: a compact JSON call
-// for structured fields, and a PLAIN-TEXT call for the session-memory
-// markdown. Embedding a multi-page document as a JSON string is what caused
-// truncated/invalid JSON around the 64k-char mark — plain text has no
-// escaping or parsing to break.
-function buildAnalysisJsonPrompt(transcript, participants) {
-  return `Eres un analista literario experto. Analiza esta transcripción de una sesión de debate de un club de lectura. Los hablantes ya están identificados con sus nombres reales, confirmados por un humano.
-
-Participantes de esta sesión (usa EXACTAMENTE estos nombres, sin variantes): ${participants.join(", ")}.
-
-RITUAL DE NOTAS DEL CLUB (muy importante): en cada sesión, cada miembro da una nota de 1 a 10 al libro DOS veces: una al principio del debate y otra al final (para medir si el debate cambió su opinión). Busca cuidadosamente ambas rondas de notas en la transcripción. Si un miembro solo da una nota o ninguna, deja el campo correspondiente en null — NO inventes notas.
+function buildAnalysisJsonPrompt(transcript) {
+  return `Analiza esta transcripción de una sesión de debate de un club de lectura en español.
 
 Transcripción:
 """
@@ -784,18 +567,30 @@ ${transcript}
 """
 
 Genera un JSON con:
-- bookTitle / bookAuthor / genre: deducidos del debate (null si no es posible).
-- generalSummary: resumen ejecutivo de la sesión (2-3 párrafos): dinámica de grupo y tono del debate.
-- grades: un elemento por participante con su nota inicial (start) y final (end), null donde no haya nota explícita.
-- speakers: para cada participante: name, voiceSnippet (una cita textual breve y característica suya) y summary (sus opiniones clave, redactadas en primera persona, máximo 3 frases).
+- bookTitle / bookAuthor / genre: el libro debatido, deducidos de la conversación (null si no es posible).
+- generalSummary: resumen ejecutivo de la sesión (2-3 párrafos): dinámica de grupo, tono del debate y grandes temas.
 
-Sé conciso en todos los campos de texto.`;
+Sé conciso.`;
 }
 
-function buildMemoriaPrompt(transcript, participants, bookTitle) {
-  return `Eres un analista literario experto. A partir de esta transcripción de una sesión de debate de un club de lectura (hablantes ya identificados con sus nombres reales), redacta la memoria de la sesión.
+function formatGradesForPrompt(grades) {
+  const lines = [];
+  const names = new Set([...Object.keys(grades.start), ...Object.keys(grades.end)]);
+  for (const name of names) {
+    lines.push(
+      `- ${name}: inicial ${grades.start[name] ?? "sin nota"}, final ${grades.end[name] ?? "sin nota"}`
+    );
+  }
+  return lines.length ? lines.join("\n") : "(sin notas registradas)";
+}
 
-Participantes: ${participants.join(", ")}.
+function buildMemoriaPrompt(transcript, grades, bookTitle) {
+  return `Eres un analista literario experto. A partir de esta transcripción de una sesión de debate de un club de lectura, redacta la memoria de la sesión.
+
+IMPORTANTE sobre atribución: la transcripción NO identifica quién habla. Atribuye una opinión a un miembro concreto SOLO cuando su nombre se oiga en la conversación ("como decía Almu...", "Jaime, ¿tú qué opinas?"). En el resto de casos usa fórmulas neutras ("uno de los miembros", "otra participante", "el grupo"). NO inventes atribuciones.
+
+NOTAS CONFIRMADAS por los miembros (1-10, verificadas por un humano — úsalas tal cual en la sección de calificaciones):
+${formatGradesForPrompt(grades)}
 
 Transcripción:
 """
@@ -810,10 +605,10 @@ Redacta un documento Markdown con EXACTAMENTE estas secciones en este orden (y n
 (Ambiente de la reunión, puntos álgidos del debate.)
 
 ## Calificaciones y Evolución
-(Análisis cualitativo de cómo y por qué variaron las notas de los miembros del principio al final.)
+(Las notas confirmadas de arriba y un análisis cualitativo de cómo evolucionó la opinión del grupo del principio al final.)
 
-## Temas Debatidos y Posturas Individuales
-(Desglose tema por tema. Para cada tema, la opinión y argumentos de CADA participante por su nombre, y el consenso o disenso final.)
+## Temas Debatidos y Posturas
+(Desglose tema por tema de lo discutido, posturas enfrentadas y consensos, con atribución solo cuando sea segura.)
 
 ## Análisis de Personajes y su Psicología
 (Discusión sobre los personajes principales y su desarrollo.)
@@ -831,39 +626,17 @@ function unwrapMarkdown(text) {
   return m ? m[1].trim() : t;
 }
 
-async function generateJsonWithRetry(prompt, schema, apiKey, tries = 3) {
-  let lastErr;
-  for (let attempt = 1; attempt <= tries; attempt++) {
-    const temperature = RETRY_TEMPERATURES[(attempt - 1) % RETRY_TEMPERATURES.length];
-    try {
-      const raw = await generateContent([{ text: prompt }], apiKey, {
-        responseMimeType: "application/json",
-        responseSchema: schema,
-        temperature,
-      });
-      return JSON.parse(raw);
-    } catch (err) {
-      lastErr = err;
-      logger.warn(`JSON generation attempt ${attempt}/${tries} (temp ${temperature}) failed: ${err.message}`);
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-  }
-  throw lastErr;
-}
-
-// Only grades for confirmed participants may enter the stats; names are
-// matched case-insensitively against the confirmed list and normalized to
-// the exact confirmed spelling.
-function reshapeAndValidateGrades(gradesArray, participants) {
-  const canonical = new Map(participants.map((p) => [p.toLowerCase(), p]));
+// Human-confirmed grade rows -> { start: {name: n}, end: {name: n} }.
+// Guests are excluded from stats; values clamped to the 1-10 ritual range.
+function buildGradesFromConfirmed(list) {
   const grades = { start: {}, end: {} };
-  for (const g of gradesArray || []) {
-    const name = canonical.get((g.member || "").trim().toLowerCase());
-    if (!name) continue;
-    const start = Number(g.start);
-    const end = Number(g.end);
-    if (!isNaN(start) && g.start !== null && start >= 1 && start <= 10) grades.start[name] = start;
-    if (!isNaN(end) && g.end !== null && end >= 1 && end <= 10) grades.end[name] = end;
+  for (const g of list || []) {
+    const member = String(g.member || "").trim();
+    const value = Number(g.value);
+    if (!member || member.toLowerCase() === "invitado") continue;
+    if (isNaN(value) || value < 1 || value > 10) continue;
+    if (g.round === "end") grades.end[member] = value;
+    else grades.start[member] = value;
   }
   return grades;
 }
@@ -872,13 +645,13 @@ export const analyzeSession = onCall(CALL_OPTS, async (request) => {
   assertAdmin(request);
   const db = getFirestore();
   const { ref, data } = await loadSession(db, request.data?.sessionId);
-  const mapping = request.data?.mapping;
+  const confirmedGrades = request.data?.grades;
 
   if (!data.transcriptPath) {
     throw new HttpsError("failed-precondition", "La sesión no tiene transcripción todavía.");
   }
-  if (!mapping || typeof mapping !== "object" || Object.keys(mapping).length === 0) {
-    throw new HttpsError("invalid-argument", "Falta el mapeo de hablantes confirmado.");
+  if (!Array.isArray(confirmedGrades)) {
+    throw new HttpsError("invalid-argument", "Faltan las notas confirmadas.");
   }
 
   const apiKey = geminiApiKey.value();
@@ -887,98 +660,35 @@ export const analyzeSession = onCall(CALL_OPTS, async (request) => {
   try {
     await ref.update({
       status: "analyzing",
-      confirmedMapping: mapping,
+      confirmedGrades,
       error: null,
       errorStage: null,
       updatedAt: new Date().toISOString(),
     });
 
     const [transcriptBuffer] = await bucket.file(data.transcriptPath).download();
-    let transcript = transcriptBuffer.toString("utf-8");
+    const transcript = transcriptBuffer.toString("utf-8");
 
-    // If the transcript was already renamed by a previous analysis run, we
-    // need the anonymous original; it is only renamed at the very end, so a
-    // retry after failure always still has [Speaker N] tags.
-    // Apply mapping, highest speaker number first so "Speaker 12" is not
-    // clobbered by the "Speaker 1" replacement.
-    const tags = Object.keys(mapping).sort(
-      (a, b) => Number(b.replace(/\D/g, "")) - Number(a.replace(/\D/g, ""))
-    );
-    for (const tag of tags) {
-      const name = String(mapping[tag] || "Invitado").trim() || "Invitado";
-      const num = tag.replace(/\D/g, "");
-      transcript = transcript.replace(new RegExp(`\\[Speaker\\s*${num}\\]`, "gi"), `[${name}]`);
-    }
+    const grades = buildGradesFromConfirmed(confirmedGrades);
 
-    const participants = [...new Set(Object.values(mapping).map((n) => String(n).trim()).filter(Boolean))];
-
-    logger.info(`Session ${ref.id}: analyzing with participants ${participants.join(", ")}`);
-    const parsed = await generateJsonWithRetry(
-      buildAnalysisJsonPrompt(transcript, participants),
-      ANALYSIS_SCHEMA,
-      apiKey
-    );
-
-    // Focused pass over the stretches where the two rating rounds happen;
-    // its evidence-backed results override the big call's, which fills gaps.
-    let gradesArray = parsed.grades || [];
-    try {
-      logger.info(`Session ${ref.id}: extracting grades (focused pass)`);
-      const head = transcript.slice(0, 24000);
-      const tail = transcript.slice(-32000);
-      const dedicated = await generateJsonWithRetry(
-        buildGradesPrompt(head, tail, participants),
-        GRADES_SCHEMA,
-        apiKey,
-        2
-      );
-      const byName = new Map(
-        gradesArray.map((g) => [(g.member || "").toLowerCase(), { ...g }])
-      );
-      for (const d of dedicated.grades || []) {
-        const key = (d.member || "").trim().toLowerCase();
-        if (!key) continue;
-        const cur = byName.get(key) || { member: d.member };
-        if (d.start !== null && d.start !== undefined) cur.start = d.start;
-        if (d.end !== null && d.end !== undefined) cur.end = d.end;
-        byName.set(key, cur);
-        logger.info(
-          `Grade evidence — ${d.member}: start=${d.start} («${d.startQuote || "—"}») end=${d.end} («${d.endQuote || "—"}»)`
-        );
-      }
-      gradesArray = [...byName.values()];
-    } catch (err) {
-      logger.warn(`Focused grades extraction failed (non-fatal): ${err.message}`);
-    }
+    logger.info(`Session ${ref.id}: analyzing`);
+    const parsed = await generateJsonWithRetry(buildAnalysisJsonPrompt(transcript), ANALYSIS_SCHEMA, apiKey);
 
     logger.info(`Session ${ref.id}: writing session memory`);
-    // MALFORMED_RESPONSE is stochastic on long generations — retry like
-    // every other call in the pipeline (generateChunkWithRetry: 3 attempts,
-    // 16k-token budget, which is ample for the memoria and degenerates less).
     const memoriaRaw = await generateChunkWithRetry(
-      [{ text: buildMemoriaPrompt(transcript, participants, parsed.bookTitle) }],
+      [{ text: buildMemoriaPrompt(transcript, grades, parsed.bookTitle) }],
       apiKey
     );
     const sessionSummaryMarkdown = unwrapMarkdown(memoriaRaw);
 
-    // Persist the named transcript for BookDetails; keep the anonymous
-    // original so re-running the analysis with a corrected mapping works.
-    const namedTranscriptPath = `transcripts/${ref.id}_named.txt`;
-    await bucket.file(namedTranscriptPath).save(transcript, {
-      contentType: "text/plain; charset=utf-8",
-    });
-
     await ref.update({
       status: "draft",
-      namedTranscriptPath,
-      transcriptExcerpt: transcript.slice(0, 1500),
       analysis: {
         bookTitle: parsed.bookTitle || null,
         bookAuthor: parsed.bookAuthor || null,
         genre: parsed.genre || null,
         generalSummary: parsed.generalSummary || "",
-        grades: reshapeAndValidateGrades(gradesArray, participants),
-        speakers: (parsed.speakers || []).filter((s) => participants.includes(s.name)),
+        grades,
         sessionSummaryMarkdown,
       },
       updatedAt: new Date().toISOString(),

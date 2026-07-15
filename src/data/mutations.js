@@ -70,36 +70,37 @@ export function requestTranscription(sessionId) {
   invokePipeline(transcribeSessionFn, { sessionId }, "transcribeSession");
 }
 
-export function requestAnalysis(sessionId, mapping) {
-  invokePipeline(analyzeSessionFn, { sessionId, mapping }, "analyzeSession");
+// `grades` is the human-confirmed list: [{ member, round: 'start'|'end', value }]
+export function requestAnalysis(sessionId, grades) {
+  invokePipeline(analyzeSessionFn, { sessionId, grades }, "analyzeSession");
 }
 
 // Retry a stuck or failed session at the right stage. A transcription-stage
-// failure always re-transcribes, even if an older transcript/mapping exists
-// from a previous run — otherwise the retry would "resume" over stale data.
+// failure always re-transcribes, even if older stage data exists from a
+// previous run — otherwise the retry would "resume" over stale data.
 export async function retrySession(session) {
   if (session.errorStage === "transcription" || !session.transcriptPath) {
     requestTranscription(session.id);
     return "transcribing";
   }
-  if (session.confirmedMapping) {
-    requestAnalysis(session.id, session.confirmedMapping);
+  if (session.confirmedGrades) {
+    requestAnalysis(session.id, session.confirmedGrades);
     return "analyzing";
   }
-  // Transcript exists but mapping was never confirmed: reopen the mapping step.
+  // Transcript exists but grades were never confirmed: reopen the grading step.
   await updateDoc(doc(db, SESSIONS_COLLECTION, session.id), {
-    status: "needs_mapping",
+    status: "needs_grading",
     error: null,
     errorStage: null,
     updatedAt: new Date().toISOString(),
   });
-  return "needs_mapping";
+  return "needs_grading";
 }
 
-// Reopen the mapping step from a draft (e.g. a voice was misassigned).
-export async function reopenMapping(sessionId) {
+// Reopen the grade-assignment step from a draft (e.g. a mark was misassigned).
+export async function reopenGrading(sessionId) {
   await updateDoc(doc(db, SESSIONS_COLLECTION, sessionId), {
-    status: "needs_mapping",
+    status: "needs_grading",
     updatedAt: new Date().toISOString(),
   });
 }

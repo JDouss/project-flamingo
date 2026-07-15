@@ -12,11 +12,14 @@ import { ref, getDownloadURL } from "firebase/storage";
 import { db, storage, SESSIONS_COLLECTION } from "./firebase";
 
 // Legacy docs (pre-pipeline) have no status field: they were saved fully
-// analyzed, so they behave as published. "processing" is the retired status
-// from the storage-trigger era; treat it as queued so it can be retried.
+// analyzed, so they behave as published. "processing" (storage-trigger era)
+// maps to queued; "needs_mapping" (diarization era) maps to needs_grading —
+// the grading step tells the user to re-transcribe if grade data is missing.
 export function sessionStatus(session) {
   const status = session?.status || "published";
-  return status === "processing" ? "queued" : status;
+  if (status === "processing") return "queued";
+  if (status === "needs_mapping") return "needs_grading";
+  return status;
 }
 
 // A session is stale when a working status has not been touched for longer
