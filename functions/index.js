@@ -193,9 +193,10 @@ async function generateContent(parts, apiKey, generationConfig = {}) {
 // A single generation over a 2h recording degenerates (MALFORMED_RESPONSE),
 // and asking Gemini to transcribe "only minute X to Y" of a long file does
 // NOT bound the work — it still ingests the whole upload. So we physically
-// split the audio with ffmpeg into ~30-min segments and transcribe each
-// separately; each request then contains only ~30 min of audio.
-const CHUNK_SECONDS = 1800; // 30-minute segments
+// split the audio with ffmpeg and transcribe each piece separately. 15-min
+// segments keep each generation short (~4k output tokens): degeneration is
+// rarer and a failed retry is cheap.
+const CHUNK_SECONDS = 900; // 15-minute segments
 
 function buildSegmentPrompt(memberCount, segmentIndex, segmentCount) {
   return `Este es el fragmento ${segmentIndex + 1} de ${segmentCount} de la grabación de una sesión de un club de lectura en español. Transcríbelo ÍNTEGRAMENTE y de forma literal.
@@ -213,14 +214,21 @@ Reglas de diarización:
 Devuelve ÚNICAMENTE la transcripción, empezando directamente por la primera intervención.`;
 }
 
-async function generateChunkWithRetry(parts, apiKey, tries = 3) {
+// Retries VARY the sampling temperature: an identical re-send tends to fall
+// into the same degenerate mode (that's why MALFORMED_RESPONSE survived 3
+// identical attempts); changing the temperature breaks the pattern.
+const RETRY_TEMPERATURES = [0.7, 1.0, 0.3, 1.3];
+
+async function generateChunkWithRetry(parts, apiKey, tries = 4) {
   let lastErr;
   for (let attempt = 1; attempt <= tries; attempt++) {
+    const temperature = RETRY_TEMPERATURES[(attempt - 1) % RETRY_TEMPERATURES.length];
     try {
-      return await generateContent(parts, apiKey, { maxOutputTokens: 16384 });
+      return await generateContent(parts, apiKey, { maxOutputTokens: 16384, temperature });
     } catch (err) {
       lastErr = err;
-      logger.warn(`Segment generation attempt ${attempt}/${tries} failed: ${err.message}`);
+      logger.warn(`Generation attempt ${attempt}/${tries} (temp ${temperature}) failed: ${err.message}`);
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
   throw lastErr;
@@ -826,15 +834,18 @@ function unwrapMarkdown(text) {
 async function generateJsonWithRetry(prompt, schema, apiKey, tries = 3) {
   let lastErr;
   for (let attempt = 1; attempt <= tries; attempt++) {
+    const temperature = RETRY_TEMPERATURES[(attempt - 1) % RETRY_TEMPERATURES.length];
     try {
       const raw = await generateContent([{ text: prompt }], apiKey, {
         responseMimeType: "application/json",
         responseSchema: schema,
+        temperature,
       });
       return JSON.parse(raw);
     } catch (err) {
       lastErr = err;
-      logger.warn(`JSON generation attempt ${attempt}/${tries} failed: ${err.message}`);
+      logger.warn(`JSON generation attempt ${attempt}/${tries} (temp ${temperature}) failed: ${err.message}`);
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
   throw lastErr;

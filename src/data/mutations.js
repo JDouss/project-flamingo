@@ -74,24 +74,26 @@ export function requestAnalysis(sessionId, mapping) {
   invokePipeline(analyzeSessionFn, { sessionId, mapping }, "analyzeSession");
 }
 
-// Retry a stuck or failed session at the right stage.
+// Retry a stuck or failed session at the right stage. A transcription-stage
+// failure always re-transcribes, even if an older transcript/mapping exists
+// from a previous run — otherwise the retry would "resume" over stale data.
 export async function retrySession(session) {
-  if (session.transcriptPath && session.confirmedMapping) {
+  if (session.errorStage === "transcription" || !session.transcriptPath) {
+    requestTranscription(session.id);
+    return "transcribing";
+  }
+  if (session.confirmedMapping) {
     requestAnalysis(session.id, session.confirmedMapping);
     return "analyzing";
   }
-  if (session.transcriptPath) {
-    // Transcript exists but mapping was never confirmed: reopen the mapping step.
-    await updateDoc(doc(db, SESSIONS_COLLECTION, session.id), {
-      status: "needs_mapping",
-      error: null,
-      errorStage: null,
-      updatedAt: new Date().toISOString(),
-    });
-    return "needs_mapping";
-  }
-  requestTranscription(session.id);
-  return "transcribing";
+  // Transcript exists but mapping was never confirmed: reopen the mapping step.
+  await updateDoc(doc(db, SESSIONS_COLLECTION, session.id), {
+    status: "needs_mapping",
+    error: null,
+    errorStage: null,
+    updatedAt: new Date().toISOString(),
+  });
+  return "needs_mapping";
 }
 
 // Reopen the mapping step from a draft (e.g. a voice was misassigned).
