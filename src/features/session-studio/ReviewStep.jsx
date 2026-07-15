@@ -11,6 +11,9 @@ export default function ReviewStep({ session, books, onPublished, onDiscard }) {
   const [bookTitle, setBookTitle] = useState(initial.bookTitle || '');
   const [bookAuthor, setBookAuthor] = useState(initial.bookAuthor || '');
   const [genre, setGenre] = useState(initial.genre || 'Debate');
+  const [sessionLabel, setSessionLabel] = useState(
+    initial.sessionLabel || `Sesión ${books.length + 1}`
+  );
   const [generalSummary, setGeneralSummary] = useState(initial.generalSummary || '');
   const [sessionSummaryMarkdown, setSessionSummaryMarkdown] = useState(initial.sessionSummaryMarkdown || '');
   const [grades, setGrades] = useState(initial.grades || { start: {}, end: {} });
@@ -30,6 +33,7 @@ export default function ReviewStep({ session, books, onPublished, onDiscard }) {
     bookTitle,
     bookAuthor,
     genre,
+    sessionLabel,
     generalSummary,
     sessionSummaryMarkdown,
     grades,
@@ -109,9 +113,21 @@ export default function ReviewStep({ session, books, onPublished, onDiscard }) {
           <input type="text" className="form-input" value={bookAuthor} onChange={(e) => setBookAuthor(e.target.value)} placeholder="ej. Carlos Ruiz Zafón" />
         </div>
       </div>
-      <div className="form-group">
-        <label className="form-label">Género</label>
-        <input type="text" className="form-input" value={genre} onChange={(e) => setGenre(e.target.value)} />
+      <div className="form-row">
+        <div className="form-group">
+          <label className="form-label">Género</label>
+          <input type="text" className="form-input" value={genre} onChange={(e) => setGenre(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Sesión del club</label>
+          <input
+            type="text"
+            className="form-input"
+            value={sessionLabel}
+            onChange={(e) => setSessionLabel(e.target.value)}
+            placeholder="Ej. Sesión 3, Sesión especial..."
+          />
+        </div>
       </div>
 
       {/* General summary */}

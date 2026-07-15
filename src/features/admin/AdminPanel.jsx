@@ -10,6 +10,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [genre, setGenre] = useState('');
+  const [sessionLabel, setSessionLabel] = useState('');
   const [rating, setRating] = useState(5);
   const [status, setStatus] = useState('completed');
   const [startDate, setStartDate] = useState('');
@@ -125,6 +126,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
       setTitle(editBook.title || '');
       setAuthor(editBook.author || '');
       setGenre(editBook.genre || '');
+      setSessionLabel(editBook.sessionLabel || '');
       setRating(editBook.rating || 5);
       setStatus(editBook.status || 'completed');
       setStartDate(editBook.startDate || '');
@@ -143,6 +145,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
       setTitle('');
       setAuthor('');
       setGenre('');
+      setSessionLabel('');
       setRating(5);
       setStatus('completed');
       setStartDate('');
@@ -277,6 +280,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
         title: title.trim(),
         author: author.trim(),
         genre: genre.trim(),
+        sessionLabel: sessionLabel.trim() || null,
         rating: Number(rating),
         status,
         startDate,
@@ -548,6 +552,17 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
                   ))}
                 </div>
               </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Sesión del club (orden de lectura)</label>
+              <input
+                type="text"
+                className="form-input"
+                value={sessionLabel}
+                onChange={(e) => setSessionLabel(e.target.value)}
+                placeholder="Ej. Sesión 3, Sesión especial Navidad..."
+              />
             </div>
 
             <div className="form-row">

@@ -941,7 +941,10 @@ export const analyzeSession = onCall(CALL_OPTS, async (request) => {
     }
 
     logger.info(`Session ${ref.id}: writing session memory`);
-    const memoriaRaw = await generateContent(
+    // MALFORMED_RESPONSE is stochastic on long generations — retry like
+    // every other call in the pipeline (generateChunkWithRetry: 3 attempts,
+    // 16k-token budget, which is ample for the memoria and degenerates less).
+    const memoriaRaw = await generateChunkWithRetry(
       [{ text: buildMemoriaPrompt(transcript, participants, parsed.bookTitle) }],
       apiKey
     );

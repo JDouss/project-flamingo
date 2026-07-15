@@ -166,6 +166,7 @@ export async function publishSessionAsNewBook(session, analysis) {
     title: (analysis.bookTitle || "Nueva Reseña de Sesión").trim(),
     author: (analysis.bookAuthor || "Autor Desconocido").trim(),
     genre: (analysis.genre || "Debate").trim(),
+    sessionLabel: (analysis.sessionLabel || "").trim() || null,
     rating: ratingFromGrades(grades),
     status: "completed",
     startDate: today,
@@ -197,6 +198,9 @@ export async function publishSessionToBook(session, analysis, book) {
     transcriptionId: session.id,
     updatedAt: new Date().toISOString(),
   };
+  if (analysis.sessionLabel && analysis.sessionLabel.trim()) {
+    update.sessionLabel = analysis.sessionLabel.trim();
+  }
   // Don't clobber an existing synopsis.
   if (analysis.generalSummary && !book.summary) {
     update.summary = analysis.generalSummary;

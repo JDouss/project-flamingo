@@ -309,6 +309,34 @@ h1, h2, h3, h4, h5, h6 {
   z-index: 2;
 }
 
+/* Bookplate-style label with the club's reading order (Sesión 3, ...). */
+.session-badge {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 0.9rem;
+  z-index: 3;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.2rem 0.6rem;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--primary-ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.tag-session {
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--primary-ink);
+  border-color: rgba(194, 19, 92, 0.3);
+  background: #ffffff;
+}
+
 .book-card-info {
   padding: 1.25rem;
   display: flex;

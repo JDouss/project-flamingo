@@ -45,7 +45,7 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
 
   if (!book) return null;
 
-  const { title, author, genre, rating, status, startDate, endDate, summary, review, imageUrl, quotes, references, privateNotes } = book;
+  const { title, author, genre, rating, status, startDate, endDate, summary, review, imageUrl, quotes, references, privateNotes, sessionLabel } = book;
 
   // Format date helper
   const formatDate = (dateStr) => {
@@ -81,6 +81,9 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
           </div>
           <div className="details-header-info">
             <div className="details-tags">
+              {sessionLabel && (
+                <span className="tag tag-session">{sessionLabel}</span>
+              )}
               <span className="tag" style={{ background: 'var(--primary-glow)', color: 'var(--primary)', borderColor: 'var(--primary)' }}>
                 {genre}
               </span>

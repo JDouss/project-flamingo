@@ -2,7 +2,7 @@
 import { Star, Edit2, Calendar } from 'lucide-react';
 
 export default function BookCard({ book, onClick, onEdit, isAdmin }) {
-  const { title, author, genre, rating, status, summary, imageUrl, endDate } = book;
+  const { title, author, genre, rating, status, summary, imageUrl, endDate, sessionLabel } = book;
 
   // Format status for display
   const getStatusClass = (status) => {
@@ -41,6 +41,10 @@ export default function BookCard({ book, onClick, onEdit, isAdmin }) {
         <span className={`book-badge ${getStatusClass(status)}`}>
           {getStatusLabel(status)}
         </span>
+
+        {sessionLabel && (
+          <span className="session-badge">{sessionLabel}</span>
+        )}
         
         {isAdmin && (
           <button
