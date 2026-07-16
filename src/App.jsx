@@ -99,9 +99,12 @@ export default function App() {
       result = result.filter((b) => b.status === selectedStatus);
     }
 
+    // Date ordering follows when the book was READ (endDate), not when it
+    // was entered into the system — bulk-added books all share a createdAt.
+    const readDate = (b) => new Date(b.endDate || b.startDate || b.createdAt || 0);
     result.sort((a, b) => {
-      if (sortBy === 'newest') return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
-      if (sortBy === 'oldest') return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+      if (sortBy === 'newest') return readDate(b) - readDate(a);
+      if (sortBy === 'oldest') return readDate(a) - readDate(b);
       if (sortBy === 'rating') return b.rating - a.rating;
       if (sortBy === 'title') return a.title.localeCompare(b.title);
       return 0;
@@ -129,7 +132,7 @@ export default function App() {
             <FlamingoIcon size={32} />
             <span className="logo-lockup">
               <span className="logo-eyebrow">Club de lectura · Flamingo Rock</span>
-              <span className="logo-title">Reseñas <em>Flamingueras</em></span>
+              <span className="logo-title">Reseñas <em>Flamíngueras</em></span>
             </span>
           </a>
 
@@ -216,8 +219,8 @@ export default function App() {
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
               >
-                <option value="newest">Más recientes</option>
-                <option value="oldest">Más antiguos</option>
+                <option value="newest">Últimos leídos</option>
+                <option value="oldest">Primeros leídos</option>
                 <option value="rating">Mejor valorados</option>
                 <option value="title">Título A-Z</option>
               </select>
@@ -228,8 +231,10 @@ export default function App() {
         {/* Reviews Grid */}
         {loading ? (
           <div className="loading-container">
-            <div className="spinner" style={{ width: '2.5rem', height: '2.5rem' }} />
-            <p style={{ fontSize: '0.95rem', color: 'var(--text-muted)' }}>Cargando estanterías de libros...</p>
+            <OpenBook size={72} className="loading-book" />
+            <p className="serif-title" style={{ fontSize: '1.05rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+              Abriendo la biblioteca…
+            </p>
           </div>
         ) : filteredAndSortedBooks.length > 0 ? (
           <div className="books-grid">
@@ -263,7 +268,7 @@ export default function App() {
       {/* Footer */}
       <footer className="site-footer">
         <Bookshelf style={{ color: 'var(--text-muted)' }} />
-        <p>© 2026 Reseñas Flamingueras · Club de lectura Flamingo Rock</p>
+        <p>© 2026 Reseñas Flamíngueras · Club de lectura Flamingo Rock</p>
       </footer>
 
       {/* Overlays / Modals */}

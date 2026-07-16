@@ -6,7 +6,7 @@ const DEFAULT_MEMBERS = [
   { id: "miembro_1", name: "Jaime", persona: "Analista de contexto histórico y político" },
   { id: "miembro_2", name: "Almu", persona: "Lectora emocional, centrada en la psicología de personajes" },
   { id: "miembro_3", name: "Alejandro", persona: "Crítico literario, enfocado en estructura y ritmo narrativo" },
-  { id: "miembro_4", name: "Joaquin", persona: "Lector escéptico, atento a giros de guión e inconsistencias" },
+  { id: "miembro_4", name: "Joaquin", persona: "Lector escéptico, atento a giros de guion e inconsistencias" },
   { id: "miembro_5", name: "Zepe", persona: "Bibliófilo apasionado de la metaliteratura y el libro físico" },
 ];
 

@@ -350,13 +350,15 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
               </h3>
               
               <div className="quotes-carousel">
-                <div className="quote-text">
-                  “{quotes[activeQuoteIdx].text}”
-                </div>
-                <div className="quote-author">
-                  — {author}
-                  {quotes[activeQuoteIdx].page && `, pág. ${quotes[activeQuoteIdx].page}`}
-                  {quotes[activeQuoteIdx].context && ` (${quotes[activeQuoteIdx].context})`}
+                <div className="quote-fade" key={activeQuoteIdx}>
+                  <div className="quote-text">
+                    “{quotes[activeQuoteIdx].text}”
+                  </div>
+                  <div className="quote-author">
+                    — {author}
+                    {quotes[activeQuoteIdx].page && `, pág. ${quotes[activeQuoteIdx].page}`}
+                    {quotes[activeQuoteIdx].context && ` (${quotes[activeQuoteIdx].context})`}
+                  </div>
                 </div>
 
                 {quotes.length > 1 && (
@@ -530,6 +532,9 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
               )}
             </div>
           ) : null}
+
+          {/* End-of-review colophon, like closing a chapter */}
+          <div className="colophon" aria-hidden="true">⁂</div>
         </div>
       </div>
     </div>

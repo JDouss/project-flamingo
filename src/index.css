@@ -84,6 +84,39 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Selecting text feels like running a highlighter over the page. */
+::selection {
+  background: rgba(255, 26, 117, 0.16);
+  color: var(--text-primary);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Consistent, visible keyboard focus — accessibility reads as quality. */
+:is(.btn, .close-btn, .carousel-btn, .voice-close-btn, .voice-tab-btn, a):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Aligned digits wherever numbers stack (grades, dashboard tables). */
+table {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
@@ -225,6 +258,27 @@ h1, h2, h3, h4, h5, h6 {
   grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
   gap: 2rem;
   margin-top: 1rem;
+}
+
+/* Books settle onto the shelf one after another on load. Fill-mode is
+   'backwards' (not 'both') so the finished animation releases the transform
+   and the hover lift keeps working. */
+.books-grid .book-card {
+  animation: riseIn 0.45s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+}
+
+.books-grid .book-card:nth-child(2) { animation-delay: 0.05s; }
+.books-grid .book-card:nth-child(3) { animation-delay: 0.10s; }
+.books-grid .book-card:nth-child(4) { animation-delay: 0.15s; }
+.books-grid .book-card:nth-child(5) { animation-delay: 0.20s; }
+.books-grid .book-card:nth-child(6) { animation-delay: 0.25s; }
+.books-grid .book-card:nth-child(7) { animation-delay: 0.30s; }
+.books-grid .book-card:nth-child(8) { animation-delay: 0.35s; }
+.books-grid .book-card:nth-child(n+9) { animation-delay: 0.4s; }
+
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
 }
 
 /* Book Card Specifics */
@@ -1165,6 +1219,34 @@ h1, h2, h3, h4, h5, h6 {
   padding: 6rem 0;
   gap: 1rem;
   color: var(--text-muted);
+}
+
+/* A book breathing softly while the library loads. */
+.loading-book {
+  color: var(--primary-ink);
+  animation: bookPulse 2.2s ease-in-out infinite;
+}
+
+@keyframes bookPulse {
+  0%, 100% { opacity: 0.45; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.04); }
+}
+
+/* End-of-text colophon mark (asterism), like closing a chapter. */
+.colophon {
+  text-align: center;
+  font-family: var(--font-serif);
+  font-size: 1.4rem;
+  letter-spacing: 0.4em;
+  padding-left: 0.4em; /* optically recenter the letterspaced glyphs */
+  color: var(--primary-ink);
+  opacity: 0.45;
+  user-select: none;
+}
+
+/* Crossfade when flipping through quotes. */
+.quote-fade {
+  animation: fadeIn 0.35s ease both;
 }
 
 /* Voice Assistant / Session Studio Modal Styles */
