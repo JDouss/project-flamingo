@@ -1,20 +1,19 @@
-# React + Vite
+# Project Flamingo 🦩
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**Project Flamingo** is a premium, AI-powered book club platform designed to automate and elevate the literary debate experience.
 
-Currently, two official plugins are available:
+## Features
+- **Serverless AI Audio Pipeline:** Upload session recordings (up to 9.5 hours) directly to Firebase Cloud Functions. The backend utilizes Google Gemini for native audio analysis, transcript generation, and extraction of human-verified grades—without needing a third-party STT service.
+- **Interactive Reading Dashboard:** Visualizes member participation, rating evolution (initial vs. final grades), and top-rated books across club sessions.
+- **Premium Light-Mode UI:** A high-end editorial design language featuring frosted glass details, subtle animations, and the club's signature neon flamingo pink accents.
+- **Session Memory Generation:** Automatically summarizes the debate, extracts verbatim quotes, and drafts the definitive session memory for the club's archive.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Tech Stack
+- **Frontend:** React, Vite, Custom CSS (Glassmorphism design tokens).
+- **Backend & Database:** Firebase (Firestore, Cloud Storage, Functions).
+- **AI Integration:** Google Gemini API (Audio native model).
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
-
----
-*Test commit verification*
-
+## Setup
+1. `npm install` to install frontend dependencies.
+2. `npm run dev` to start the local Vite server.
+3. Use Firebase CLI (`firebase deploy`) to manage the Cloud Functions and Firestore rules. Note: The Gemini API key is securely stored in Google Secret Manager.
