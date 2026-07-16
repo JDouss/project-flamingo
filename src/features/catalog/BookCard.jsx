@@ -55,12 +55,14 @@ export default function BookCard({ book, onClick, onEdit, isAdmin }) {
             className="btn btn-secondary btn-icon"
             style={{
               position: 'absolute',
-              top: '1rem',
-              left: '1rem',
+              top: '0.75rem',
+              left: '0.75rem',
               width: '2.2rem',
               height: '2.2rem',
-              background: 'rgba(7, 10, 19, 0.85)',
-              backdropFilter: 'blur(4px)',
+              background: 'rgba(255, 255, 255, 0.92)',
+              backdropFilter: 'blur(6px)',
+              WebkitBackdropFilter: 'blur(6px)',
+              color: 'var(--primary-ink)',
               borderColor: 'var(--border)'
             }}
             title="Editar reseña"
