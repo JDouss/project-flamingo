@@ -1703,3 +1703,135 @@ h1, h2, h3, h4, h5, h6 {
   align-items: center;
   gap: 1rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Mobile adjustments — additive only, desktop untouched.
+   The editorial spacing that breathes on a laptop suffocates a phone.
+--------------------------------------------------------------------------- */
+
+@media (max-width: 767px) {
+  /* Details modal: tame the huge paddings and the full-width cover */
+  .details-overlay {
+    padding: 1rem 0.5rem;
+  }
+
+  .details-hero {
+    padding: 2.25rem 1.25rem 1.75rem;
+    gap: 1.5rem;
+  }
+
+  .book-object {
+    width: 100%;
+    max-width: 190px;
+    margin: 0 auto;
+  }
+
+  .details-title {
+    font-size: 2rem;
+    text-align: center;
+  }
+
+  .details-author {
+    text-align: center;
+  }
+
+  .details-header-info {
+    align-items: center;
+  }
+
+  .details-tags {
+    justify-content: center;
+  }
+
+  .details-body {
+    padding: 1.75rem 1.25rem;
+    gap: 2.25rem;
+  }
+
+  .details-meta-grid {
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+  }
+
+  .section-title {
+    font-size: 1.35rem;
+  }
+
+  .review-text {
+    font-size: 1rem;
+  }
+
+  .quotes-carousel {
+    padding: 2rem 1.25rem 1.5rem;
+  }
+
+  .quote-text {
+    font-size: 1.25rem;
+  }
+
+  /* Session studio + fullscreen editor */
+  .voice-assistant-modal {
+    width: 96%;
+    max-height: 92vh;
+  }
+
+  .voice-assistant-body {
+    padding: 1rem;
+  }
+
+  .fullscreen-editor-body {
+    flex-direction: column;
+  }
+
+  .fullscreen-editor-pane,
+  .fullscreen-editor-preview-pane {
+    width: 100%;
+    height: 50%;
+    border-right: none;
+  }
+
+  .fullscreen-editor-pane {
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 640px) {
+  .container {
+    padding: 2rem 1rem;
+  }
+
+  /* Header: stack the masthead over the actions, let buttons wrap */
+  .header-content {
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.9rem 1rem;
+  }
+
+  .logo-title {
+    font-size: 1.25rem;
+  }
+
+  .logo-eyebrow {
+    font-size: 0.56rem;
+    letter-spacing: 0.18em;
+  }
+
+  .header-actions .btn {
+    padding: 0.45rem 0.85rem;
+    font-size: 0.78rem;
+  }
+
+  /* Decorative on desktop, dead weight on a phone */
+  .admin-pill {
+    display: none;
+  }
+
+  .books-grid {
+    gap: 1.25rem;
+  }
+
+  .site-footer {
+    margin-top: 3.5rem;
+    padding: 2rem 1rem 2.5rem;
+  }
+}
