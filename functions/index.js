@@ -46,7 +46,10 @@ initializeApp();
 
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 
-const GEMINI_MODEL = "gemini-3.5-flash";
+// 3.6 Flash: same input price as 3.5 Flash, cheaper output ($7.50 vs $9.00
+// per 1M) and ~17% fewer output tokens, with the same 1M context / 65k
+// output / structured-output surface this pipeline relies on.
+const GEMINI_MODEL = "gemini-3.6-flash";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com";
 const SESSIONS_COLLECTION = "transcriptions";
 const MEMBERS_COLLECTION = "speakers_registry";
