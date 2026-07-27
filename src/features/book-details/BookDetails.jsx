@@ -45,7 +45,7 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
 
   if (!book) return null;
 
-  const { title, author, genre, rating, status, startDate, endDate, summary, review, imageUrl, quotes, references, privateNotes, sessionLabel } = book;
+  const { title, author, genre, rating, status, startDate, endDate, summary, review, imageUrl, quotes, references, privateNotes, sessionLabel, suggestedBy } = book;
 
   // Format date helper
   const formatDate = (dateStr) => {
@@ -142,6 +142,12 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
               <span className="meta-label">Género</span>
               <span className="meta-value">{genre}</span>
             </div>
+            {suggestedBy && (
+              <div className="meta-item">
+                <span className="meta-label">Propuesto por</span>
+                <span className="meta-value">{suggestedBy}</span>
+              </div>
+            )}
           </div>
 
           {/* Quick Summary */}

@@ -1,8 +1,8 @@
 
-import { Star, Edit2, Calendar } from 'lucide-react';
+import { Star, Edit2, Calendar, User } from 'lucide-react';
 
 export default function BookCard({ book, onClick, onEdit, isAdmin }) {
-  const { title, author, genre, rating, status, summary, imageUrl, endDate, sessionLabel } = book;
+  const { title, author, genre, rating, status, summary, imageUrl, endDate, sessionLabel, suggestedBy } = book;
 
   // Format status for display
   const getStatusClass = (status) => {
@@ -101,6 +101,18 @@ export default function BookCard({ book, onClick, onEdit, isAdmin }) {
             <Calendar size={12} />
             {status === 'completed' && endDate ? `Leído en ${formatDate(endDate)}` : 'En progreso'}
           </span>
+
+          {suggestedBy && (
+            <span
+              style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', minWidth: 0 }}
+              title={`Propuesto por ${suggestedBy}`}
+            >
+              <User size={12} style={{ flexShrink: 0 }} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                Propuesto por {suggestedBy}
+              </span>
+            </span>
+          )}
         </div>
       </div>
     </div>
