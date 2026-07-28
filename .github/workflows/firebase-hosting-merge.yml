@@ -40,3 +40,23 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_PROJECT_FLAMINGO_497112 }}
           channelId: live
           projectId: project-flamingo-497112
+
+      # Hosting alone is not the whole app: security rules and the callable
+      # functions have to ship with the code that depends on them, or a merge
+      # leaves the frontend asking for permissions the live ruleset denies.
+      - name: Authenticate the Firebase CLI
+        env:
+          FIREBASE_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_PROJECT_FLAMINGO_497112 }}
+        run: printf '%s' "$FIREBASE_SA" > "$RUNNER_TEMP/firebase-sa.json"
+
+      - name: Deploy Firestore and Storage rules
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+        run: npx --yes firebase-tools@latest deploy --only firestore:rules,storage --project project-flamingo-497112 --non-interactive
+
+      # Kept as its own step: a functions deploy is the slow, most
+      # failure-prone part, and rules should already be live if it trips.
+      - name: Deploy Cloud Functions
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+        run: npx --yes firebase-tools@latest deploy --only functions --project project-flamingo-497112 --non-interactive
