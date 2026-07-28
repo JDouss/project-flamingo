@@ -33,6 +33,29 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Personal reading log. PRIVATE, unlike every collection above: a doc is
+    // readable and writable only by the email that owns it. No public-read
+    // clause — a logged-out visitor gets nothing, and one owner can never see
+    // another's reads. Listing requires the query to filter on ownerEmail.
+    match /personal_reads/{readId} {
+      function ownerEmail() {
+        return request.auth != null && request.auth.token.email != null
+          ? request.auth.token.email.lower()
+          : null;
+      }
+
+      allow read, delete: if ownerEmail() != null
+        && ownerEmail() == resource.data.ownerEmail;
+      // An update must leave the doc owned by the same person — otherwise an
+      // owner could hand their read to someone else's library.
+      allow update: if ownerEmail() != null
+        && ownerEmail() == resource.data.ownerEmail
+        && ownerEmail() == request.resource.data.ownerEmail;
+      // Creating a doc owned by someone else is not allowed either.
+      allow create: if ownerEmail() != null
+        && ownerEmail() == request.resource.data.ownerEmail;
+    }
+
     // Deny everything else.
     match /{document=**} {
       allow read, write: if false;

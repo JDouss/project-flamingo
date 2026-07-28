@@ -53,6 +53,7 @@ const GEMINI_MODEL = "gemini-3.6-flash";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com";
 const SESSIONS_COLLECTION = "transcriptions";
 const MEMBERS_COLLECTION = "speakers_registry";
+const READS_COLLECTION = "personal_reads";
 
 // Keep in sync with firestore.rules / storage.rules.
 const ADMIN_EMAILS = ["doussinague95@gmail.com"];
@@ -63,6 +64,14 @@ const CALL_OPTS = {
   memory: "2GiB",
   timeoutSeconds: 3600,
   secrets: [geminiApiKey],
+};
+
+// A voice note is minutes, not hours: it needs neither the 2 GiB of tmpfs the
+// session splitter uses nor a one-hour ceiling.
+const NOTE_CALL_OPTS = {
+  ...CALL_OPTS,
+  memory: "1GiB",
+  timeoutSeconds: 540,
 };
 
 const MIME_BY_EXT = {
@@ -207,12 +216,15 @@ async function generateChunkWithRetry(parts, apiKey, tries = 4) {
   throw lastErr;
 }
 
-async function generateJsonWithRetry(prompt, schema, apiKey, tries = 3) {
+// Accepts either a plain prompt string or a full parts array (so the same
+// retry/repair logic covers multimodal calls, e.g. audio + instructions).
+async function generateJsonWithRetry(promptOrParts, schema, apiKey, tries = 3) {
+  const parts = Array.isArray(promptOrParts) ? promptOrParts : [{ text: promptOrParts }];
   let lastErr;
   for (let attempt = 1; attempt <= tries; attempt++) {
     const temperature = RETRY_TEMPERATURES[(attempt - 1) % RETRY_TEMPERATURES.length];
     try {
-      const raw = await generateContent([{ text: prompt }], apiKey, {
+      const raw = await generateContent(parts, apiKey, {
         responseMimeType: "application/json",
         responseSchema: schema,
         temperature,
@@ -702,5 +714,204 @@ export const analyzeSession = onCall(CALL_OPTS, async (request) => {
   } catch (err) {
     await failSession(ref, "analysis", err);
     throw new HttpsError("internal", err.message || "Analysis failed.");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Personal reading log — voice note -> transcript + structured takeaways
+// ---------------------------------------------------------------------------
+
+const READING_NOTE_SCHEMA = {
+  type: "object",
+  properties: {
+    transcript: { type: "string" },
+    summary: { type: "string" },
+    keyInsights: { type: "array", items: { type: "string" } },
+    standouts: { type: "array", items: { type: "string" } },
+    themes: { type: "array", items: { type: "string" } },
+    verdict: { type: "string", nullable: true },
+    suggestedRating: { type: "number", nullable: true },
+  },
+  required: ["transcript", "summary"],
+};
+
+function buildReadingNotePrompt(read) {
+  const book = [read.title, read.author && `de ${read.author}`].filter(Boolean).join(" ");
+  return `Este es un audio en español: una nota de voz que una persona se graba a sí misma justo después de terminar un libro${book ? ` (${book})` : ""}. Habla de forma informal, sin guion, y puede divagar o corregirse.
+
+Devuelve un JSON con:
+- transcript: la transcripción LITERAL de lo que dice, con puntuación correcta. No resumas aquí, no añadas marcas de tiempo ni etiquetas de hablante.
+- summary: 2-3 frases con la idea general de lo que opina del libro.
+- keyInsights: las ideas que merece la pena guardar (lo que aprendió, lo que le hizo pensar). Frases completas y concretas, en SUS palabras siempre que se pueda. Lista vacía si realmente no dice ninguna.
+- standouts: lo que le llamó la atención — escenas, personajes, la prosa, la estructura, el ritmo.
+- themes: 3-6 etiquetas cortas (1-3 palabras) con los temas del libro o de su reflexión.
+- verdict: una sola frase que capture su valoración final, en su mismo registro. null si no llega a valorarlo.
+- suggestedRating: SOLO si dice explícitamente una nota numérica (del 1 al 10). Si no dice ningún número, null. NO deduzcas una nota a partir del tono.
+
+Reglas: no inventes nada que no esté en el audio. Si la nota es muy corta, devuelve listas cortas o vacías en lugar de rellenar con paja.`;
+}
+
+// MediaRecorder in Chrome produces audio/webm;codecs=opus, which the Gemini
+// Files API rejects. Normalizing to 16 kHz mono WAV sidesteps the whole
+// container/codec question: PCM needs no encoder compiled into ffmpeg, and
+// 16 kHz mono is plenty for speech.
+async function transcodeToWav(buffer, ext) {
+  const dir = await mkdtemp(path.join(tmpdir(), "flamingo-note-"));
+  try {
+    const inputPath = path.join(dir, `input.${ext || "bin"}`);
+    const outputPath = path.join(dir, "note.wav");
+    await writeFile(inputPath, buffer);
+
+    await new Promise((resolve, reject) => {
+      const ff = spawn(ffmpegPath, [
+        "-hide_banner", "-loglevel", "error",
+        "-i", inputPath,
+        "-ac", "1",
+        "-ar", "16000",
+        "-f", "wav",
+        outputPath,
+      ]);
+      let stderr = "";
+      ff.stderr.on("data", (d) => (stderr += d.toString()));
+      ff.on("error", reject);
+      ff.on("close", (code) =>
+        code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(0, 300)}`))
+      );
+    });
+
+    return await readFile(outputPath);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+function cleanStringList(value, maxItems, maxLen = 400) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .slice(0, maxItems)
+    .map((item) => item.slice(0, maxLen));
+}
+
+export const analyzeReadingNote = onCall(NOTE_CALL_OPTS, async (request) => {
+  const email = request.auth?.token?.email?.toLowerCase();
+  if (!email) {
+    throw new HttpsError("permission-denied", "Necesitas iniciar sesión.");
+  }
+
+  const readId = request.data?.readId;
+  if (!readId || typeof readId !== "string") {
+    throw new HttpsError("invalid-argument", "Falta readId.");
+  }
+
+  const db = getFirestore();
+  const ref = db.collection(READS_COLLECTION).doc(readId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    throw new HttpsError("not-found", `No existe la lectura ${readId}.`);
+  }
+
+  const data = snap.data();
+  // Ownership, not just "is an admin": this collection is private per owner,
+  // and the Admin SDK bypasses the Firestore rules that would say so.
+  if (data.ownerEmail !== email) {
+    throw new HttpsError("permission-denied", "Esta lectura no es tuya.");
+  }
+
+  const audioPath = data.voiceNote?.audioPath;
+  if (!audioPath) {
+    throw new HttpsError("failed-precondition", "Esta lectura no tiene nota de voz.");
+  }
+
+  // Release a stale lock from a run that died mid-flight (the callable's own
+  // ceiling is 9 minutes, so 30 is comfortably past any live run).
+  if (data.noteStatus === "transcribing") {
+    const lockAge = Date.now() - new Date(data.updatedAt || 0).getTime();
+    if (lockAge < 30 * 60 * 1000) {
+      throw new HttpsError("failed-precondition", "Esta nota ya se está procesando.");
+    }
+  }
+
+  const apiKey = geminiApiKey.value();
+  const bucket = getStorage().bucket();
+
+  try {
+    await ref.update({
+      noteStatus: "transcribing",
+      error: null,
+      errorStage: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    logger.info(`Read ${ref.id}: downloading ${audioPath}`);
+    const [rawBuffer] = await bucket.file(audioPath).download();
+    const ext = audioPath.toLowerCase().split(".").pop();
+
+    let audioBuffer;
+    let mimeType;
+    try {
+      audioBuffer = await transcodeToWav(rawBuffer, ext);
+      mimeType = "audio/wav";
+    } catch (err) {
+      // Better to try the original bytes than to fail outright: an .mp3 or
+      // .ogg upload is already something Gemini accepts.
+      logger.warn(`Read ${ref.id}: transcode failed (${err.message}); sending original audio.`);
+      audioBuffer = rawBuffer;
+      mimeType = MIME_BY_EXT[ext] || "audio/mp3";
+    }
+
+    logger.info(`Read ${ref.id}: analyzing voice note (${audioBuffer.length} bytes, ${mimeType})`);
+    const geminiFile = await uploadToGeminiFiles(audioBuffer, mimeType, `note-${ref.id}`, apiKey);
+
+    let parsed;
+    try {
+      parsed = await generateJsonWithRetry(
+        [
+          { file_data: { file_uri: geminiFile.uri, mime_type: mimeType } },
+          { text: buildReadingNotePrompt(data) },
+        ],
+        READING_NOTE_SCHEMA,
+        apiKey
+      );
+    } finally {
+      deleteGeminiFile(geminiFile.name, apiKey);
+    }
+
+    const transcript = String(parsed.transcript || "").trim();
+    if (!transcript) {
+      throw new Error("La transcripción de la nota llegó vacía. ¿Se grabó algo de audio?");
+    }
+
+    const suggested = Number(parsed.suggestedRating);
+    await ref.update({
+      noteStatus: "ready",
+      transcript,
+      insights: {
+        summary: String(parsed.summary || "").trim().slice(0, 2000),
+        keyInsights: cleanStringList(parsed.keyInsights, 12),
+        standouts: cleanStringList(parsed.standouts, 12),
+        themes: cleanStringList(parsed.themes, 8, 60),
+        verdict: parsed.verdict ? String(parsed.verdict).trim().slice(0, 400) : null,
+        suggestedRating: !isNaN(suggested) && suggested >= 1 && suggested <= 10 ? suggested : null,
+      },
+      error: null,
+      errorStage: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    logger.info(`Read ${ref.id}: voice note ready.`);
+    return { status: "ready" };
+  } catch (err) {
+    logger.error(`Read ${ref.id}: voice note analysis failed:`, err);
+    await ref
+      .update({
+        noteStatus: "error",
+        errorStage: "analysis",
+        error: err.message || String(err),
+        updatedAt: new Date().toISOString(),
+      })
+      .catch(() => {});
+    throw new HttpsError("internal", err.message || "Voice note analysis failed.");
   }
 });
