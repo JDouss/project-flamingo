@@ -11,6 +11,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
   const [author, setAuthor] = useState('');
   const [genre, setGenre] = useState('');
   const [sessionLabel, setSessionLabel] = useState('');
+  const [suggestedBy, setSuggestedBy] = useState('');
   const [rating, setRating] = useState(5);
   const [status, setStatus] = useState('completed');
   const [startDate, setStartDate] = useState('');
@@ -127,6 +128,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
       setAuthor(editBook.author || '');
       setGenre(editBook.genre || '');
       setSessionLabel(editBook.sessionLabel || '');
+      setSuggestedBy(editBook.suggestedBy || '');
       setRating(editBook.rating || 5);
       setStatus(editBook.status || 'completed');
       setStartDate(editBook.startDate || '');
@@ -146,6 +148,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
       setAuthor('');
       setGenre('');
       setSessionLabel('');
+      setSuggestedBy('');
       setRating(5);
       setStatus('completed');
       setStartDate('');
@@ -281,6 +284,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
         author: author.trim(),
         genre: genre.trim(),
         sessionLabel: sessionLabel.trim() || null,
+        suggestedBy: suggestedBy.trim() || null,
         rating: Number(rating),
         status,
         startDate,
@@ -554,15 +558,36 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
               </div>
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Sesión del club (orden de lectura)</label>
-              <input
-                type="text"
-                className="form-input"
-                value={sessionLabel}
-                onChange={(e) => setSessionLabel(e.target.value)}
-                placeholder="Ej. Sesión 3, Sesión especial Navidad..."
-              />
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Sesión del club (orden de lectura)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={sessionLabel}
+                  onChange={(e) => setSessionLabel(e.target.value)}
+                  placeholder="Ej. Sesión 3, Sesión especial Navidad..."
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Propuesto por</label>
+                {/* Free text so a book can credit several miembros ("Almu y Zepe"),
+                    with the registry offered as suggestions. */}
+                <input
+                  type="text"
+                  className="form-input"
+                  list="suggested-by-options"
+                  value={suggestedBy}
+                  onChange={(e) => setSuggestedBy(e.target.value)}
+                  placeholder="Ej. Almu, Alejandro, Zepe..."
+                />
+                <datalist id="suggested-by-options">
+                  {members.map((m) => (
+                    <option key={m.id || m.name} value={m.name} />
+                  ))}
+                </datalist>
+              </div>
             </div>
 
             <div className="form-row">
