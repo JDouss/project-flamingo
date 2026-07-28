@@ -3,6 +3,12 @@ on:
   pull_request:
     branches:
       - main
+# The default GITHUB_TOKEN is read-only, but the hosting action creates a
+# "Deploy Preview" check run and comments the preview URL on the PR.
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
 jobs:
   build_and_preview:
     runs-on: ubuntu-latest
