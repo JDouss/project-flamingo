@@ -6,9 +6,9 @@ import {
   updateDoc,
   deleteDoc,
 } from "firebase/firestore";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
-import { db, storage, functions, SESSIONS_COLLECTION } from "./firebase";
+import { db, storage, functions, SESSIONS_COLLECTION, READS_COLLECTION } from "./firebase";
 
 // ---------- helpers ----------
 
@@ -239,4 +239,79 @@ export async function linkSessionToBook(sessionId, bookId) {
     bookId,
     updatedAt: new Date().toISOString(),
   });
+}
+
+// ---------- personal reading log ----------
+
+const analyzeReadingNoteFn = httpsCallable(functions, "analyzeReadingNote", { timeout: 70000 });
+
+// Same fire-and-forget contract as the club pipeline: the function keeps
+// running server-side and reports progress onto the doc, so closing the tab
+// mid-analysis loses nothing.
+export function requestNoteAnalysis(readId) {
+  invokePipeline(analyzeReadingNoteFn, { readId }, "analyzeReadingNote");
+}
+
+export async function savePersonalRead(readId, readData) {
+  if (readId) {
+    await updateDoc(doc(db, READS_COLLECTION, readId), readData);
+    return readId;
+  }
+  const readRef = await addDoc(collection(db, READS_COLLECTION), readData);
+  return readRef.id;
+}
+
+// Voice notes live under a private Storage prefix (see storage.rules) keyed
+// by read id, so deleting a read can clean up after itself.
+export async function uploadVoiceNote(readId, file, onProgress) {
+  const safeName = file.name.replace(/[^\w.-]+/g, "_");
+  const audioPath = `voice-notes/${readId}/${Date.now()}_${safeName}`;
+  await uploadWithProgress(ref(storage, audioPath), file, onProgress);
+  return { audioPath, audioName: file.name, uploadedAt: new Date().toISOString() };
+}
+
+export async function deleteVoiceNoteAudio(audioPath) {
+  if (!audioPath) return;
+  // Best effort: a missing object must not block replacing or deleting a read.
+  await deleteObject(ref(storage, audioPath)).catch((err) => {
+    console.warn("Voice note cleanup failed:", err);
+  });
+}
+
+// Attach (or replace) a voice note and kick off the analysis.
+export async function attachVoiceNote(readId, file, onProgress, previousAudioPath) {
+  await updateDoc(doc(db, READS_COLLECTION, readId), {
+    noteStatus: "uploading",
+    error: null,
+    errorStage: null,
+    updatedAt: new Date().toISOString(),
+  });
+
+  const voiceNote = await uploadVoiceNote(readId, file, onProgress);
+
+  await updateDoc(doc(db, READS_COLLECTION, readId), {
+    voiceNote,
+    noteStatus: "queued",
+    // A re-recording invalidates whatever the previous audio produced.
+    transcript: "",
+    insights: null,
+    updatedAt: new Date().toISOString(),
+  });
+
+  if (previousAudioPath && previousAudioPath !== voiceNote.audioPath) {
+    await deleteVoiceNoteAudio(previousAudioPath);
+  }
+
+  requestNoteAnalysis(readId);
+  return voiceNote;
+}
+
+export async function deletePersonalRead(read) {
+  await deleteDoc(doc(db, READS_COLLECTION, read.id));
+  await deleteVoiceNoteAudio(read.voiceNote?.audioPath);
+}
+
+export async function fetchVoiceNoteUrl(audioPath) {
+  if (!audioPath) return "";
+  return getDownloadURL(ref(storage, audioPath));
 }

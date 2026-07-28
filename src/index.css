@@ -1835,3 +1835,9 @@ h1, h2, h3, h4, h5, h6 {
     padding: 2rem 1rem 2.5rem;
   }
 }
+
+/* Recording indicator for the personal reading log's voice note. */
+@keyframes recPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.82); }
+}

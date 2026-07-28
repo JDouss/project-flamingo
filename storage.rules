@@ -34,6 +34,17 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
     }
 
+    // Personal reading-log voice notes. Unlike /recordings above, these are
+    // NOT world-readable: personal audio is private to the admin who recorded
+    // it. 25 MB cap — longer audio belongs in the club Session Studio, which
+    // has the segmenting pipeline for it.
+    match /voice-notes/{allPaths=**} {
+      allow read: if isAdmin();
+      allow write: if isAdmin()
+        && request.resource.size < 25 * 1024 * 1024
+        && request.resource.contentType.matches('audio/.*');
+    }
+
     // Legacy voiceprints (feature removed): keep readable, block new writes.
     match /voiceprints/{allPaths=**} {
       allow read: if true;

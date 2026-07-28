@@ -49,3 +49,5 @@ export const authorizedEmails = authorizedEmailsEnv
 // migration; code-level naming uses "sessions" / "members".
 export const SESSIONS_COLLECTION = "transcriptions";
 export const MEMBERS_COLLECTION = "speakers_registry";
+// Private per-owner reading log — never mixed into the public `books` query.
+export const READS_COLLECTION = "personal_reads";

@@ -9,6 +9,7 @@ import {
   Filter,
   SlidersHorizontal,
   BookOpen,
+  BookMarked,
   Volume2,
   TrendingUp
 } from 'lucide-react';
@@ -21,6 +22,7 @@ import FlamingoIcon from './ui/FlamingoIcon';
 import { OpenBook, Bookshelf } from './ui/ornaments';
 import SessionStudio from './features/session-studio/SessionStudio';
 import ClubDashboard from './features/dashboard/ClubDashboard';
+import PersonalLibrary from './features/personal/PersonalLibrary';
 import { useBooks } from './data/useBooks';
 
 export default function App() {
@@ -34,6 +36,7 @@ export default function App() {
   const [editingBook, setEditingBook] = useState(null);
   const [isStudioOpen, setIsStudioOpen] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [isPersonalOpen, setIsPersonalOpen] = useState(false);
 
   // Filters and sorting states
   const [searchQuery, setSearchQuery] = useState('');
@@ -146,6 +149,9 @@ export default function App() {
                   <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--sage)', display: 'inline-block', boxShadow: '0 0 8px var(--sage)' }}></span>
                   Admin Activo
                 </span>
+                <button className="btn btn-secondary" onClick={() => setIsPersonalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <BookMarked size={15} /> Mi Diario
+                </button>
                 <button className="btn btn-secondary" onClick={() => setIsStudioOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                   <Volume2 size={15} /> Sesión de Club
                 </button>
@@ -311,6 +317,16 @@ export default function App() {
           isOpen={isStatsOpen}
           onClose={() => setIsStatsOpen(false)}
           books={books}
+        />
+      )}
+
+      {/* Private reading log — mounted only while signed in, and the
+          Firestore rules scope every doc to the owner's email anyway. */}
+      {isPersonalOpen && user && (
+        <PersonalLibrary
+          isOpen={isPersonalOpen}
+          onClose={() => setIsPersonalOpen(false)}
+          ownerEmail={(user.email || '').toLowerCase()}
         />
       )}
     </div>
