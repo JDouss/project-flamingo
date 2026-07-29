@@ -1,8 +1,11 @@
 
-import { Star, Edit2, Calendar, User } from 'lucide-react';
+import { Star, Edit2, Calendar, User, BookOpen } from 'lucide-react';
+import { PERSONAL_SOURCE } from '../personal/readAdapter';
 
 export default function BookCard({ book, onClick, onEdit, isAdmin }) {
-  const { title, author, genre, rating, status, summary, imageUrl, endDate, sessionLabel, suggestedBy } = book;
+  const { title, author, genre, rating, status, summary, imageUrl, endDate, sessionLabel, suggestedBy, source } = book;
+
+  const isPersonal = source === PERSONAL_SOURCE;
 
   // Format status for display
   const getStatusClass = (status) => {
@@ -10,6 +13,8 @@ export default function BookCard({ book, onClick, onEdit, isAdmin }) {
       case 'completed': return 'status-completed';
       case 'reading': return 'status-reading';
       case 'to-read': return 'status-to-read';
+      // Personal reads can also be given up on.
+      case 'abandoned': return 'status-abandoned';
       default: return 'status-to-read';
     }
   };
@@ -19,6 +24,7 @@ export default function BookCard({ book, onClick, onEdit, isAdmin }) {
       case 'completed': return 'Leído';
       case 'reading': return 'Leyendo';
       case 'to-read': return 'Por leer';
+      case 'abandoned': return 'Abandonado';
       default: return 'Por leer';
     }
   };
@@ -37,13 +43,22 @@ export default function BookCard({ book, onClick, onEdit, isAdmin }) {
   return (
     <div className="glass-card book-card" onClick={onClick}>
       <div className="book-cover-container">
-        <img src={imageUrl} alt={title} className="book-cover-img" loading="lazy" />
+        {imageUrl ? (
+          <img src={imageUrl} alt={title} className="book-cover-img" loading="lazy" />
+        ) : (
+          // A personal read can be logged in seconds without hunting for a
+          // cover; the shelf still needs something with the right shape.
+          <div className="book-cover-placeholder">
+            <BookOpen size={30} />
+            <span>{title}</span>
+          </div>
+        )}
         <span className={`book-badge ${getStatusClass(status)}`}>
           {getStatusLabel(status)}
         </span>
 
-        {sessionLabel && (
-          <span className="session-badge">{sessionLabel}</span>
+        {(sessionLabel || isPersonal) && (
+          <span className="session-badge">{sessionLabel || 'Mi lectura'}</span>
         )}
         
         {isAdmin && (

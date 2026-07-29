@@ -3,37 +3,33 @@ import { X, BookMarked, Lock } from 'lucide-react';
 import ReadForm from './ReadForm';
 import ReadList from './ReadList';
 import PersonalStats from './PersonalStats';
+import PersonalReadDetails from './PersonalReadDetails';
 import { usePersonalReads } from '../../data/usePersonalReads';
-import { savePersonalRead } from '../../data/mutations';
 
-// Diario de lectura personal: private to the signed-in owner. Everything here
-// reads and writes `personal_reads`, which the Firestore rules scope to the
-// owner's email — the public catalog never sees these books.
-export default function PersonalLibrary({ isOpen, onClose, ownerEmail }) {
-  const [activeTab, setActiveTab] = useState('new'); // new | list | stats
-  const [editingRead, setEditingRead] = useState(null);
+// Mi Biblioteca: where personal reads are added and managed. Browsing them
+// happens on the main shelf (they merge in with the club catalog when the
+// toggle is on); this modal owns the editing side of that.
+export default function PersonalLibrary({ isOpen, onClose, ownerEmail, initialEditRead }) {
+  const [activeTab, setActiveTab] = useState(initialEditRead ? 'new' : 'list');
+  const [editingRead, setEditingRead] = useState(initialEditRead || null);
+  const [detailRead, setDetailRead] = useState(null);
   const { reads, loading, error } = usePersonalReads(isOpen ? ownerEmail : null);
 
   if (!isOpen) return null;
 
-  const handleSaved = () => {
-    setEditingRead(null);
-    setActiveTab('list');
-  };
+  // The list is live, so the open detail modal follows edits and pipeline
+  // progress instead of showing the snapshot it was opened with.
+  const liveDetailRead = detailRead ? reads.find((r) => r.id === detailRead.id) || null : null;
 
   const startEdit = (read) => {
+    setDetailRead(null);
     setEditingRead(read);
     setActiveTab('new');
   };
 
-  // The voice note may name a grade out loud; applying it is always an
-  // explicit choice, never an automatic overwrite.
-  const applySuggestedRating = async (read, rating) => {
-    try {
-      await savePersonalRead(read.id, { rating, updatedAt: new Date().toISOString() });
-    } catch (err) {
-      console.error('Could not apply suggested rating:', err);
-    }
+  const leaveForm = () => {
+    setEditingRead(null);
+    setActiveTab('list');
   };
 
   return (
@@ -43,11 +39,9 @@ export default function PersonalLibrary({ isOpen, onClose, ownerEmail }) {
         <div className="voice-assistant-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <BookMarked size={20} style={{ color: 'var(--primary)' }} />
-            <h3 className="serif-title" style={{ fontSize: '1.4rem', margin: 0 }}>
-              Mi diario de lectura
-            </h3>
+            <h3 className="serif-title" style={{ fontSize: '1.4rem', margin: 0 }}>Mi Biblioteca</h3>
             <span
-              title="Sólo tú puedes ver esto"
+              title="Sólo tú puedes ver estas lecturas"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -78,10 +72,7 @@ export default function PersonalLibrary({ isOpen, onClose, ownerEmail }) {
           <button
             type="button"
             className={`voice-tab-btn ${activeTab === 'list' ? 'active' : ''}`}
-            onClick={() => {
-              setEditingRead(null);
-              setActiveTab('list');
-            }}
+            onClick={leaveForm}
           >
             Mis lecturas {reads.length > 0 && `(${reads.length})`}
           </button>
@@ -119,18 +110,15 @@ export default function PersonalLibrary({ isOpen, onClose, ownerEmail }) {
               key={editingRead ? editingRead.id : 'new'}
               ownerEmail={ownerEmail}
               editRead={editingRead}
-              onSaved={handleSaved}
-              onCancel={() => {
-                setEditingRead(null);
-                setActiveTab('list');
-              }}
+              onSaved={leaveForm}
+              onCancel={leaveForm}
             />
           ) : activeTab === 'list' ? (
             <ReadList
               reads={reads}
               loading={loading}
+              onOpen={setDetailRead}
               onEdit={startEdit}
-              onApplySuggestedRating={applySuggestedRating}
             />
           ) : (
             <PersonalStats reads={reads} />
@@ -143,6 +131,14 @@ export default function PersonalLibrary({ isOpen, onClose, ownerEmail }) {
           </button>
         </div>
       </div>
+
+      {liveDetailRead && (
+        <PersonalReadDetails
+          read={liveDetailRead}
+          onClose={() => setDetailRead(null)}
+          onEdit={startEdit}
+        />
+      )}
     </>
   );
 }
