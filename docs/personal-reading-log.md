@@ -1,8 +1,9 @@
-# Diario de lectura personal (Personal Reading Log)
+# Mi Biblioteca (Personal Reading Log)
 
-A private companion to the public club catalog: a place to log the books you
-read on your own, grade them, dictate a quick voice note with your thoughts,
-and see your own reading stats.
+Your own reads, kept privately but shelved alongside the club's. The club
+catalog and your personal reading are two halves of the same reading life, so
+the app treats them as one shelf you can switch on, rather than two apps
+bolted together.
 
 ## Goals
 
@@ -10,8 +11,10 @@ and see your own reading stats.
 2. Grade it on the same 1-10 scale the club uses.
 3. Record (or upload) a short voice note; the pipeline turns it into
    structured takeaways: key insights, what stood out, themes, verdict.
-4. A personal dashboard over your own reads only.
-5. **Private.** Never visible in the public catalog, never readable by a
+4. **Optionally merge your reads into the main shelf**, so the catalog shows
+   everything you have read — club and personal — in one grid.
+5. A personal dashboard over your own reads only.
+6. **Private.** Never visible in the public catalog, never readable by a
    logged-out visitor, enforced server-side.
 
 ## Non-goals (deliberately out of scope for this iteration)
@@ -38,7 +41,7 @@ public catalog query can never pick it up by accident.
 | `startDate`, `finishedAt` | string (yyyy-mm-dd) | either may be empty |
 | `format` | string | `papel` \| `ebook` \| `audiolibro` |
 | `notes` | string | free text you type yourself |
-| `coverUrl` | string \| null | optional, reuses the existing `covers/` upload |
+| `coverUrl` | string \| null | optional; uploaded to the club's `covers/` prefix, or a pasted URL |
 | `voiceNote` | object \| null | `{ audioPath, audioName, uploadedAt }` |
 | `noteStatus` | string | pipeline state, see below |
 | `transcript` | string | verbatim transcript of the voice note |
@@ -121,20 +124,56 @@ has the segmenting machinery for hour-long audio.
 
 ## UI
 
-A new **"Mi Biblioteca"** button in the header, visible only when signed in,
-opening a modal with three tabs (the `SessionStudio` shell pattern):
+The feature has two surfaces, split by intent: **the shelf is for browsing,
+the modal is for managing.**
+
+### The shared shelf (browsing)
+
+A signed-in-only **"Incluir mis lecturas"** toggle in the catalog controls
+merges your reads into the main grid. It is off by default, so the catalog
+opens as the club's.
+
+`readAdapter.js` is the only place that reconciles the two shapes. Club books
+and personal reads are stored separately and graded differently (1-5 stars
+vs 1-10), so the adapter normalizes a read into the card shape — including
+`starsFromTen`, which works precisely because a personal grade uses the same
+1-10 ritual scale as a club debate grade. Search, genre/status filters and
+sorting then apply across both with no special cases.
+
+Personal cards are rendered by the same `BookCard`, marked **"Mi lectura"** in
+the slot where club books show their session label. A read logged without a
+cover gets a cover-shaped placeholder rather than a broken image, so a book
+can still be logged in seconds. Clicking one opens `PersonalReadDetails`;
+clicking a club book still opens `BookDetails`. Editing dispatches the same
+way — personal reads open the library editor, club books the admin panel.
+
+### Mi Biblioteca (managing)
+
+A header button, visible only when signed in, opening a modal with three tabs
+(the `SessionStudio` shell pattern):
 
 - **Nueva lectura** — the log form: title, author, genre, format, rating
-  (1-10 in half steps, shown as stars), dates, free-text notes, optional
-  cover, and the voice note. The recorder uses `MediaRecorder` with a live
-  timer and playback-before-upload; there is a file-upload fallback for
-  browsers that deny microphone access.
-- **Mis lecturas** — your reads, newest first, with search and a rating
-  filter. Each row expands into the detail view: insights, transcript
-  (collapsed), notes, and edit/delete.
-- **Estadísticas** — personal dashboard: totals, average rating, rating
-  distribution, reads per month, genre breakdown, best-rated, and a
-  this-year-vs-last-year comparison.
+  (1-10 in half steps, shown as stars), dates, free-text notes, cover
+  (upload or pasted URL), and the voice note. The recorder uses
+  `MediaRecorder` with a live timer and playback-before-upload; there is a
+  file-upload fallback for browsers that deny microphone access.
+- **Mis lecturas** — compact rows with cover thumbnails, search and a status
+  filter, each showing its voice-note state. Opening one shows the same
+  `PersonalReadDetails` the shelf opens, so there is a single detail view
+  rather than two that drift apart.
+- **Estadísticas** — personal dashboard: totals, average rating, reads per
+  month, genre breakdown, best-rated, and a this-year-vs-last-year
+  comparison. Scoped to personal reads only.
+
+## Known trade-off: cover privacy
+
+Covers go to the same public-read `covers/` prefix the club uses, so a
+personal cover is served like any other image. The image is a book jacket,
+not personal content, and the path is unguessable — but it is not *private*
+the way the doc and the voice note are. Keeping covers behind the auth wall
+would mean fetching a signed URL per card, which flickers on a grid. If that
+trade is wrong, the fix is a private prefix plus on-demand URL resolution,
+the same pattern the voice-note player already uses.
 
 ## Edge cases handled
 

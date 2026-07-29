@@ -23,11 +23,18 @@ import { OpenBook, Bookshelf } from './ui/ornaments';
 import SessionStudio from './features/session-studio/SessionStudio';
 import ClubDashboard from './features/dashboard/ClubDashboard';
 import PersonalLibrary from './features/personal/PersonalLibrary';
+import PersonalReadDetails from './features/personal/PersonalReadDetails';
 import { useBooks } from './data/useBooks';
+import { usePersonalReads } from './data/usePersonalReads';
+import { readToCard, bookToCard, PERSONAL_SOURCE } from './features/personal/readAdapter';
 
 export default function App() {
   const { books, loading } = useBooks();
   const [user, setUser] = useState(null);
+  const ownerEmail = user ? (user.email || '').toLowerCase() : null;
+  // Personal reads are only ever fetched for a signed-in owner; a visitor's
+  // session never issues the query at all.
+  const { reads } = usePersonalReads(ownerEmail);
 
   // Modal states
   const [isLoginOpen, setIsLoginOpen] = useState(false);
@@ -37,6 +44,9 @@ export default function App() {
   const [isStudioOpen, setIsStudioOpen] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isPersonalOpen, setIsPersonalOpen] = useState(false);
+  const [editingRead, setEditingRead] = useState(null);
+  const [selectedReadId, setSelectedReadId] = useState(null);
+  const [includePersonal, setIncludePersonal] = useState(false);
 
   // Filters and sorting states
   const [searchQuery, setSearchQuery] = useState('');
@@ -77,13 +87,27 @@ export default function App() {
     [books, selectedBookId]
   );
 
+  // The shelf: club books, plus your own reads when the toggle is on. They
+  // are normalized to one card shape so search, filters and sorting apply
+  // across both without special cases below.
+  const shelf = useMemo(() => {
+    const clubCards = books.map(bookToCard);
+    if (!includePersonal || !ownerEmail) return clubCards;
+    return [...clubCards, ...reads.map(readToCard)];
+  }, [books, reads, includePersonal, ownerEmail]);
+
+  const selectedRead = useMemo(
+    () => reads.find((r) => r.id === selectedReadId) || null,
+    [reads, selectedReadId]
+  );
+
   const genres = useMemo(() => {
-    const allGenres = books.map((b) => b.genre).filter(Boolean);
+    const allGenres = shelf.map((b) => b.genre).filter(Boolean);
     return [...new Set(allGenres)];
-  }, [books]);
+  }, [shelf]);
 
   const filteredAndSortedBooks = useMemo(() => {
-    let result = [...books];
+    let result = [...shelf];
 
     if (searchQuery.trim() !== '') {
       const q = searchQuery.toLowerCase();
@@ -114,7 +138,25 @@ export default function App() {
     });
 
     return result;
-  }, [books, searchQuery, selectedGenre, selectedStatus, sortBy]);
+  }, [shelf, searchQuery, selectedGenre, selectedStatus, sortBy]);
+
+  // A card can be either kind of book, so opening and editing dispatch on the
+  // source rather than assuming the club catalog.
+  const openCard = (card) => {
+    if (card.source === PERSONAL_SOURCE) setSelectedReadId(card.id);
+    else setSelectedBookId(card.id);
+  };
+
+  const editCard = (card) => {
+    if (card.source === PERSONAL_SOURCE) {
+      setSelectedReadId(null);
+      setEditingRead(card.read || card);
+      setIsPersonalOpen(true);
+      return;
+    }
+    setEditingBook(card);
+    setIsAdminOpen(true);
+  };
 
   const startEdit = (book) => {
     setEditingBook(book);
@@ -150,7 +192,7 @@ export default function App() {
                   Admin Activo
                 </span>
                 <button className="btn btn-secondary" onClick={() => setIsPersonalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <BookMarked size={15} /> Mi Diario
+                  <BookMarked size={15} /> Mi Biblioteca
                 </button>
                 <button className="btn btn-secondary" onClick={() => setIsStudioOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                   <Volume2 size={15} /> Sesión de Club
@@ -214,6 +256,8 @@ export default function App() {
                 <option value="completed">Leído</option>
                 <option value="reading">Leyendo</option>
                 <option value="to-read">Por leer</option>
+                {/* Only reachable when your own reads are on the shelf. */}
+                {includePersonal && ownerEmail && <option value="abandoned">Abandonado</option>}
               </select>
             </div>
 
@@ -231,6 +275,23 @@ export default function App() {
                 <option value="title">Título A-Z</option>
               </select>
             </div>
+
+            {/* Merge your own reads into the club shelf. Signed-in only, and
+                off by default so the catalog opens as the club's. */}
+            {ownerEmail && (
+              <label className={`shelf-toggle ${includePersonal ? 'active' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={includePersonal}
+                  onChange={(e) => setIncludePersonal(e.target.checked)}
+                />
+                <BookMarked size={14} />
+                Incluir mis lecturas
+                {includePersonal && reads.length > 0 && (
+                  <span className="shelf-toggle-count">{reads.length}</span>
+                )}
+              </label>
+            )}
           </div>
         </div>
 
@@ -246,10 +307,10 @@ export default function App() {
           <div className="books-grid">
             {filteredAndSortedBooks.map((book) => (
               <BookCard
-                key={book.id}
+                key={`${book.source}-${book.id}`}
                 book={book}
-                onClick={() => setSelectedBookId(book.id)}
-                onEdit={startEdit}
+                onClick={() => openCard(book)}
+                onEdit={editCard}
                 isAdmin={!!user}
               />
             ))}
@@ -322,11 +383,27 @@ export default function App() {
 
       {/* Private reading log — mounted only while signed in, and the
           Firestore rules scope every doc to the owner's email anyway. */}
-      {isPersonalOpen && user && (
+      {isPersonalOpen && ownerEmail && (
         <PersonalLibrary
           isOpen={isPersonalOpen}
-          onClose={() => setIsPersonalOpen(false)}
-          ownerEmail={(user.email || '').toLowerCase()}
+          onClose={() => {
+            setIsPersonalOpen(false);
+            setEditingRead(null);
+          }}
+          ownerEmail={ownerEmail}
+          initialEditRead={editingRead}
+        />
+      )}
+
+      {selectedRead && (
+        <PersonalReadDetails
+          read={selectedRead}
+          onClose={() => setSelectedReadId(null)}
+          onEdit={(read) => {
+            setSelectedReadId(null);
+            setEditingRead(read);
+            setIsPersonalOpen(true);
+          }}
         />
       )}
     </div>

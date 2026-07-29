@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Save, Star, Loader2, AlertTriangle } from 'lucide-react';
+import { Save, Star, Loader2, AlertTriangle, UploadCloud, X } from 'lucide-react';
 import VoiceNoteRecorder from './VoiceNoteRecorder';
-import { savePersonalRead, attachVoiceNote } from '../../data/mutations';
+import { savePersonalRead, attachVoiceNote, uploadCover } from '../../data/mutations';
 
 const EMPTY = {
   title: '',
@@ -13,6 +13,7 @@ const EMPTY = {
   startDate: '',
   finishedAt: '',
   notes: '',
+  coverUrl: '',
 };
 
 // The club rates 1-10 and displays 1-5 stars; keep the same relationship here
@@ -33,6 +34,7 @@ function initialForm(editRead) {
     startDate: editRead.startDate || '',
     finishedAt: editRead.finishedAt || '',
     notes: editRead.notes || '',
+    coverUrl: editRead.coverUrl || '',
   };
 }
 
@@ -42,9 +44,29 @@ function initialForm(editRead) {
 export default function ReadForm({ ownerEmail, editRead, onSaved, onCancel }) {
   const [form, setForm] = useState(() => initialForm(editRead));
   const [noteFile, setNoteFile] = useState(null);
+  const [coverFile, setCoverFile] = useState(null);
+  const [coverPreview, setCoverPreview] = useState(editRead?.coverUrl || '');
   const [saving, setSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(-1);
   const [error, setError] = useState('');
+
+  const pickCover = (e) => {
+    const picked = e.target.files?.[0];
+    if (!picked) return;
+    if (!picked.type.startsWith('image/')) {
+      setError('La portada tiene que ser una imagen (PNG, JPG, WebP).');
+      return;
+    }
+    setError('');
+    setCoverFile(picked);
+    setCoverPreview(URL.createObjectURL(picked));
+  };
+
+  const clearCover = () => {
+    setCoverFile(null);
+    setCoverPreview('');
+    update('coverUrl', '');
+  };
 
   const update = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
 
@@ -58,6 +80,10 @@ export default function ReadForm({ ownerEmail, editRead, onSaved, onCancel }) {
     setError('');
     setSaving(true);
     try {
+      // Covers share the club's `covers/` prefix: it is the same kind of
+      // asset, and the rules there already allow admin writes.
+      const coverUrl = coverFile ? await uploadCover(coverFile) : form.coverUrl.trim();
+
       const now = new Date().toISOString();
       const payload = {
         ownerEmail,
@@ -70,6 +96,7 @@ export default function ReadForm({ ownerEmail, editRead, onSaved, onCancel }) {
         startDate: form.startDate,
         finishedAt: form.status === 'completed' ? form.finishedAt : '',
         notes: form.notes.trim(),
+        coverUrl: coverUrl || null,
         updatedAt: now,
       };
 
@@ -227,6 +254,52 @@ export default function ReadForm({ ownerEmail, editRead, onSaved, onCancel }) {
             onChange={(e) => update('finishedAt', e.target.value)}
             disabled={form.status !== 'completed'}
           />
+        </div>
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Portada</label>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          {coverPreview ? (
+            <div className="upload-preview" style={{ flexShrink: 0 }}>
+              <img src={coverPreview} alt="Portada" />
+              <button type="button" className="remove-preview-btn" onClick={clearCover} title="Quitar portada">
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => document.getElementById('read-cover-input').click()}
+              disabled={saving}
+            >
+              <UploadCloud size={15} /> Subir portada
+            </button>
+          )}
+          <input
+            id="read-cover-input"
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={pickCover}
+          />
+          <div style={{ flex: 1, minWidth: '14rem' }}>
+            <input
+              type="url"
+              className="form-input"
+              value={coverFile ? '' : form.coverUrl}
+              disabled={!!coverFile}
+              onChange={(e) => {
+                update('coverUrl', e.target.value);
+                setCoverPreview(e.target.value);
+              }}
+              placeholder="…o pega la URL de una portada"
+            />
+            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0.35rem 0 0' }}>
+              Opcional. Sin portada, el libro aparece en la estantería con una tarjeta sencilla.
+            </p>
+          </div>
         </div>
       </div>
 
