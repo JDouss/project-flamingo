@@ -54,6 +54,12 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
         run: npx --yes firebase-tools@latest deploy --only firestore:rules,storage --project project-flamingo-497112 --non-interactive
 
+      # The CLI loads functions/index.js to discover what to deploy, so the
+      # functions' own dependencies must exist locally — the root `npm ci`
+      # above does not install them.
+      - name: Install functions dependencies
+        run: npm ci --prefix functions
+
       # Kept as its own step: a functions deploy is the slow, most
       # failure-prone part, and rules should already be live if it trips.
       - name: Deploy Cloud Functions
