@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { BookOpen, Star, TrendingUp, Award } from 'lucide-react';
+import { BookOpen, Star, TrendingUp, Award, FileText, Globe } from 'lucide-react';
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
@@ -83,6 +83,16 @@ export default function PersonalStats({ reads }) {
       .sort((a, b) => b.count - a.count)
       .slice(0, 8);
 
+    // Bibliographic aggregates — the reason the optional fields are worth
+    // filling in. Books missing a value simply do not contribute.
+    const totalPages = finished.reduce(
+      (sum, r) => sum + (Number(r.pages) > 0 ? Number(r.pages) : 0),
+      0
+    );
+    const countries = new Set(
+      finished.map((r) => (r.country || '').trim()).filter(Boolean)
+    );
+
     const best = [...rated].sort((a, b) => Number(b.rating) - Number(a.rating))[0] || null;
     const withNotes = reads.filter((r) => r.insights).length;
 
@@ -98,6 +108,8 @@ export default function PersonalStats({ reads }) {
       genreRows,
       best,
       withNotes,
+      totalPages,
+      countries: countries.size,
     };
   }, [reads]);
 
@@ -147,6 +159,22 @@ export default function PersonalStats({ reads }) {
           value={stats.withNotes}
           hint={`de ${stats.total} lecturas`}
         />
+        {stats.totalPages > 0 && (
+          <StatTile
+            icon={<FileText size={18} />}
+            label="PÁGINAS LEÍDAS"
+            value={stats.totalPages.toLocaleString('es-ES')}
+            hint="en libros terminados"
+          />
+        )}
+        {stats.countries > 0 && (
+          <StatTile
+            icon={<Globe size={18} />}
+            label="PAÍSES"
+            value={stats.countries}
+            hint="de origen"
+          />
+        )}
       </div>
 
       {stats.best && (

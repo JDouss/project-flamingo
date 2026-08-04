@@ -42,6 +42,10 @@ public catalog query can never pick it up by accident.
 | `format` | string | `papel` \| `ebook` \| `audiolibro` |
 | `notes` | string | free text you type yourself |
 | `coverUrl` | string \| null | optional; uploaded to the club's `covers/` prefix, or a pasted URL |
+| `pages` | number \| null | optional; feeds the "páginas leídas" stat |
+| `country` | string \| null | optional; country of origin — author's nationality or original publication |
+| `publicationYear` | number \| null | optional; year of the *original* edition, not a reprint |
+| `originalLanguage` | string \| null | optional; language the book was written in |
 | `voiceNote` | object \| null | `{ audioPath, audioName, uploadedAt }` |
 | `noteStatus` | string | pipeline state, see below |
 | `transcript` | string | verbatim transcript of the voice note |
@@ -186,3 +190,14 @@ the same pattern the voice-note player already uses.
   recording all degrade to the file-upload path with an explicit message.
 - Deleting a read deletes its audio too (best effort; a failure there is
   logged, not surfaced, since the doc is already gone).
+
+## Bibliographic fields
+
+`pages`, `country`, `publicationYear` and `originalLanguage` exist on **both**
+`books` and `personal_reads`, with the same names and meaning, so the merged
+shelf and the dashboards can treat the two sources alike.
+
+All four are optional everywhere. A missing value never blocks saving and
+simply does not contribute to an aggregate — `PersonalStats` only shows the
+"páginas leídas" and "países" tiles once there is something to count. Books
+that predate the fields are filled in by hand from each review's edit form.

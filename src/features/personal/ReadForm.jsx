@@ -14,6 +14,10 @@ const EMPTY = {
   finishedAt: '',
   notes: '',
   coverUrl: '',
+  pages: '',
+  country: '',
+  publicationYear: '',
+  originalLanguage: '',
 };
 
 // The club rates 1-10 and displays 1-5 stars; keep the same relationship here
@@ -35,6 +39,10 @@ function initialForm(editRead) {
     finishedAt: editRead.finishedAt || '',
     notes: editRead.notes || '',
     coverUrl: editRead.coverUrl || '',
+    pages: editRead.pages ?? '',
+    country: editRead.country || '',
+    publicationYear: editRead.publicationYear ?? '',
+    originalLanguage: editRead.originalLanguage || '',
   };
 }
 
@@ -97,6 +105,10 @@ export default function ReadForm({ ownerEmail, editRead, onSaved, onCancel }) {
         finishedAt: form.status === 'completed' ? form.finishedAt : '',
         notes: form.notes.trim(),
         coverUrl: coverUrl || null,
+        pages: form.pages === '' ? null : Number(form.pages),
+        country: form.country.trim() || null,
+        publicationYear: form.publicationYear === '' ? null : Number(form.publicationYear),
+        originalLanguage: form.originalLanguage.trim() || null,
         updatedAt: now,
       };
 
@@ -253,6 +265,57 @@ export default function ReadForm({ ownerEmail, editRead, onSaved, onCancel }) {
             value={form.finishedAt}
             onChange={(e) => update('finishedAt', e.target.value)}
             disabled={form.status !== 'completed'}
+          />
+        </div>
+      </div>
+
+      {/* Optional bibliographic data — same fields the club catalog uses, so
+          the merged shelf and the stats speak one language. */}
+      <div className="form-row">
+        <div className="form-group">
+          <label className="form-label">Páginas</label>
+          <input
+            type="number"
+            min="1"
+            className="form-input"
+            value={form.pages}
+            onChange={(e) => update('pages', e.target.value)}
+            placeholder="ej. 320"
+          />
+        </div>
+        <div className="form-group">
+          <label className="form-label">País de origen</label>
+          <input
+            type="text"
+            className="form-input"
+            value={form.country}
+            onChange={(e) => update('country', e.target.value)}
+            placeholder="ej. Japón"
+          />
+        </div>
+      </div>
+
+      <div className="form-row">
+        <div className="form-group">
+          <label className="form-label">Año de publicación</label>
+          <input
+            type="number"
+            min="0"
+            max="2100"
+            className="form-input"
+            value={form.publicationYear}
+            onChange={(e) => update('publicationYear', e.target.value)}
+            placeholder="ej. 1987"
+          />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Idioma original</label>
+          <input
+            type="text"
+            className="form-input"
+            value={form.originalLanguage}
+            onChange={(e) => update('originalLanguage', e.target.value)}
+            placeholder="ej. Japonés"
           />
         </div>
       </div>
