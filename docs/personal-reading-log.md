@@ -201,3 +201,17 @@ All four are optional everywhere. A missing value never blocks saving and
 simply does not contribute to an aggregate — `PersonalStats` only shows the
 "páginas leídas" and "países" tiles once there is something to count. Books
 that predate the fields are filled in by hand from each review's edit form.
+
+### Where the aggregates surface
+
+- **Mi Biblioteca → Estadísticas** — "páginas leídas" and "países" tiles over
+  your personal reads.
+- **Panel de Estadísticas (club)** — the same two as highlight cards, plus a
+  "De dónde y de cuándo leemos" block: books per country, original languages,
+  and the span between the oldest and newest publication year.
+
+The club aggregates deliberately count **every finished book**, not just the
+graded subset the rest of that dashboard is built on: a book was read whether
+or not the club recorded debate grades for it. Every tile and block is hidden
+until at least one book carries the relevant field, so a half-filled shelf
+never shows a misleading zero.

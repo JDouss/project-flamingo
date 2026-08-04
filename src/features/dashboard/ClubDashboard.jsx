@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { X, TrendingUp, Users, BookOpen, Sparkles, Award } from 'lucide-react';
+import { X, TrendingUp, Users, BookOpen, Sparkles, Award, FileText, Globe } from 'lucide-react';
 
 export default function ClubDashboard({ isOpen, onClose, books = [] }) {
   const [sortField, setSortField] = useState('date');
@@ -148,6 +148,49 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
     });
   }, [gradedBooks, sortField, sortAsc, stats]);
 
+  // Bibliographic aggregates. Deliberately computed over every finished book
+  // rather than the graded subset above: a book counts as read whether or not
+  // the club recorded grades for it. Books missing a value contribute nothing.
+  const library = useMemo(() => {
+    const finished = books.filter((b) => b.status === 'completed');
+
+    const totalPages = finished.reduce(
+      (sum, b) => sum + (Number(b.pages) > 0 ? Number(b.pages) : 0),
+      0
+    );
+    const withPages = finished.filter((b) => Number(b.pages) > 0).length;
+
+    const tally = (field) => {
+      const counts = {};
+      finished.forEach((b) => {
+        const key = (b[field] || '').trim();
+        if (!key) return;
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      return Object.entries(counts)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+    };
+
+    const countryRows = tally('country');
+    const languageRows = tally('originalLanguage');
+
+    const years = finished
+      .map((b) => Number(b.publicationYear))
+      .filter((y) => y > 0)
+      .sort((a, b) => a - b);
+
+    return {
+      totalPages,
+      withPages,
+      finishedCount: finished.length,
+      countryRows,
+      languageRows,
+      oldest: years[0] || null,
+      newest: years[years.length - 1] || null,
+    };
+  }, [books]);
+
   if (!isOpen) return null;
 
   const toggleSort = (field) => {
@@ -240,7 +283,87 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
                   </div>
                 )}
 
+
+                {/* Pages read — only once some book carries a page count */}
+                {library.totalPages > 0 && (
+                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', padding: '1rem', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                      <FileText size={12} style={{ color: 'var(--primary)' }} /> PÁGINAS LEÍDAS
+                    </span>
+                    <span style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--primary-ink)' }}>
+                      {library.totalPages.toLocaleString('es-ES')}
+                    </span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      En {library.withPages} de {library.finishedCount} libros con datos
+                    </span>
+                  </div>
+                )}
+
+                {/* Countries visited */}
+                {library.countryRows.length > 0 && (
+                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', padding: '1rem', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                      <Globe size={12} style={{ color: 'var(--primary)' }} /> PAÍSES VISITADOS
+                    </span>
+                    <span style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--primary-ink)' }}>
+                      {library.countryRows.length}
+                    </span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Más leído: <strong style={{ color: 'var(--primary)' }}>{library.countryRows[0].name}</strong>
+                    </span>
+                  </div>
+                )}
+
               </div>
+
+              {/* Geography and eras — hidden until the shelf carries the data */}
+              {(library.countryRows.length > 0 || library.languageRows.length > 0) && (
+                <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', padding: '1.25rem', borderRadius: 'var(--radius-md)', marginBottom: '2rem' }}>
+                  <h4 className="serif-title" style={{ fontSize: '1.15rem', marginBottom: '1rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <Globe size={16} /> De dónde y de cuándo leemos
+                  </h4>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem' }}>
+                    {library.countryRows.length > 0 && (
+                      <div>
+                        <p style={{ margin: '0 0 0.6rem', fontSize: '0.7rem', fontWeight: 'bold', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>POR PAÍS</p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                          {library.countryRows.slice(0, 8).map((row) => (
+                            <div key={row.name} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.8rem' }}>
+                              <span style={{ width: '7rem', flexShrink: 0, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={row.name}>
+                                {row.name}
+                              </span>
+                              <div style={{ flex: 1, height: '8px', background: 'rgba(42,26,46,0.07)', borderRadius: '4px', overflow: 'hidden' }}>
+                                <div style={{ width: `${Math.round((row.count / library.countryRows[0].count) * 100)}%`, height: '100%', background: 'var(--primary)' }} />
+                              </div>
+                              <span style={{ width: '1.5rem', textAlign: 'right', color: 'var(--text-muted)' }}>{row.count}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {library.languageRows.length > 0 && (
+                      <div>
+                        <p style={{ margin: '0 0 0.6rem', fontSize: '0.7rem', fontWeight: 'bold', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>IDIOMA ORIGINAL</p>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                          {library.languageRows.map((row) => (
+                            <span key={row.name} className="tag" style={{ fontSize: '0.72rem' }}>
+                              {row.name} · {row.count}
+                            </span>
+                          ))}
+                        </div>
+                        {library.oldest && library.newest && (
+                          <p style={{ margin: '1rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                            Publicaciones entre <strong style={{ color: 'var(--primary-ink)' }}>{library.oldest}</strong> y{' '}
+                            <strong style={{ color: 'var(--primary-ink)' }}>{library.newest}</strong>
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Timeline Evolution (Area Chart SVG) */}
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', padding: '1.25rem', borderRadius: 'var(--radius-md)', marginBottom: '2rem' }}>
