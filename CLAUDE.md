@@ -18,6 +18,8 @@ Guidance for agents working in this repository.
 
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 
+- **This applies to code, never to data.** Anything a user entered — reviews, sessions, grades, recordings, personal reads — must stay accessible forever. Reading paths for older document shapes are not "obsolete paths": deleting them makes real content unreachable. If a shape genuinely must change, migrate the documents first and verify, then remove the old path.
+
 ## Project notes
 
 - **Deploys are automatic on merge to `main`.** The workflow ships hosting, Firestore/Storage rules, and Cloud Functions together — the frontend must never depend on rules or functions that have not shipped with it.

@@ -204,6 +204,30 @@ export default function PersonalReadDetails({ read, onClose, onEdit }) {
                 <span className="meta-value">{read.genre}</span>
               </div>
             )}
+            {read.pages != null && read.pages !== '' && (
+              <div className="meta-item">
+                <span className="meta-label">Páginas</span>
+                <span className="meta-value">{read.pages}</span>
+              </div>
+            )}
+            {read.country && (
+              <div className="meta-item">
+                <span className="meta-label">País de origen</span>
+                <span className="meta-value">{read.country}</span>
+              </div>
+            )}
+            {read.publicationYear != null && read.publicationYear !== '' && (
+              <div className="meta-item">
+                <span className="meta-label">Publicado en</span>
+                <span className="meta-value">{read.publicationYear}</span>
+              </div>
+            )}
+            {read.originalLanguage && (
+              <div className="meta-item">
+                <span className="meta-label">Idioma original</span>
+                <span className="meta-value">{read.originalLanguage}</span>
+              </div>
+            )}
           </div>
 
           {working && !stale && (

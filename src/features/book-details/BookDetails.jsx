@@ -45,7 +45,7 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
 
   if (!book) return null;
 
-  const { title, author, genre, rating, status, startDate, endDate, summary, review, imageUrl, quotes, references, privateNotes, sessionLabel, suggestedBy } = book;
+  const { title, author, genre, rating, status, startDate, endDate, summary, review, imageUrl, quotes, references, privateNotes, sessionLabel, suggestedBy, pages, country, publicationYear, originalLanguage } = book;
 
   // Format date helper
   const formatDate = (dateStr) => {
@@ -146,6 +146,30 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
               <div className="meta-item">
                 <span className="meta-label">Propuesto por</span>
                 <span className="meta-value">{suggestedBy}</span>
+              </div>
+            )}
+            {pages != null && pages !== '' && (
+              <div className="meta-item">
+                <span className="meta-label">Páginas</span>
+                <span className="meta-value">{pages}</span>
+              </div>
+            )}
+            {country && (
+              <div className="meta-item">
+                <span className="meta-label">País de origen</span>
+                <span className="meta-value">{country}</span>
+              </div>
+            )}
+            {publicationYear != null && publicationYear !== '' && (
+              <div className="meta-item">
+                <span className="meta-label">Publicado en</span>
+                <span className="meta-value">{publicationYear}</span>
+              </div>
+            )}
+            {originalLanguage && (
+              <div className="meta-item">
+                <span className="meta-label">Idioma original</span>
+                <span className="meta-value">{originalLanguage}</span>
               </div>
             )}
           </div>

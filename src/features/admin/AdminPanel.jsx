@@ -12,6 +12,12 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
   const [genre, setGenre] = useState('');
   const [sessionLabel, setSessionLabel] = useState('');
   const [suggestedBy, setSuggestedBy] = useState('');
+  // Optional bibliographic data. Empty is always valid: never block saving a
+  // review because a page count is unknown.
+  const [pages, setPages] = useState('');
+  const [country, setCountry] = useState('');
+  const [publicationYear, setPublicationYear] = useState('');
+  const [originalLanguage, setOriginalLanguage] = useState('');
   const [rating, setRating] = useState(5);
   const [status, setStatus] = useState('completed');
   const [startDate, setStartDate] = useState('');
@@ -129,6 +135,10 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
       setGenre(editBook.genre || '');
       setSessionLabel(editBook.sessionLabel || '');
       setSuggestedBy(editBook.suggestedBy || '');
+      setPages(editBook.pages ?? '');
+      setCountry(editBook.country || '');
+      setPublicationYear(editBook.publicationYear ?? '');
+      setOriginalLanguage(editBook.originalLanguage || '');
       setRating(editBook.rating || 5);
       setStatus(editBook.status || 'completed');
       setStartDate(editBook.startDate || '');
@@ -149,6 +159,10 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
       setGenre('');
       setSessionLabel('');
       setSuggestedBy('');
+      setPages('');
+      setCountry('');
+      setPublicationYear('');
+      setOriginalLanguage('');
       setRating(5);
       setStatus('completed');
       setStartDate('');
@@ -285,6 +299,10 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
         genre: genre.trim(),
         sessionLabel: sessionLabel.trim() || null,
         suggestedBy: suggestedBy.trim() || null,
+        pages: pages === '' ? null : Number(pages),
+        country: country.trim() || null,
+        publicationYear: publicationYear === '' ? null : Number(publicationYear),
+        originalLanguage: originalLanguage.trim() || null,
         rating: Number(rating),
         status,
         startDate,
@@ -587,6 +605,59 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
                     <option key={m.id || m.name} value={m.name} />
                   ))}
                 </datalist>
+              </div>
+            </div>
+
+            {/* Bibliographic data — all optional, shown in the details view
+                and aggregated by the dashboards. */}
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Páginas</label>
+                <input
+                  type="number"
+                  min="1"
+                  className="form-input"
+                  value={pages}
+                  onChange={(e) => setPages(e.target.value)}
+                  placeholder="ej. 320"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">País de origen</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                  placeholder="ej. Chile"
+                />
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Año de publicación</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="2100"
+                  className="form-input"
+                  value={publicationYear}
+                  onChange={(e) => setPublicationYear(e.target.value)}
+                  placeholder="ej. 1998"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Idioma original</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={originalLanguage}
+                  onChange={(e) => setOriginalLanguage(e.target.value)}
+                  placeholder="ej. Español"
+                />
               </div>
             </div>
 
