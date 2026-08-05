@@ -12,6 +12,9 @@ export const AuthContext = createContext({
   // authority; this is their mirror, and it is what lets the app know which
   // clubs to offer without listing a collection it has no permission to read.
   clubs: {},
+  // Re-reads the claim from a freshly minted token. Call it after joining or
+  // creating a club, which is when the one in hand has just gone stale.
+  refreshClubs: async () => ({}),
   ready: false,
   logout: () => {},
 });

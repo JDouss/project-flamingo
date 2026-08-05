@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet, useMatch, useNavigate } from 'react-router-dom';
 import { LogIn, LogOut, BookMarked, TrendingUp, Library } from 'lucide-react';
 import FlamingoIcon from '../ui/FlamingoIcon';
 import { Bookshelf } from '../ui/ornaments';
 import LoginModal from '../features/admin/LoginModal';
 import { useAuth } from './authContext';
+import { useMyClubs } from '../data/useClub';
 
 // Icon + label sit on one line, the way the header buttons always have.
 const navStyle = { display: 'flex', alignItems: 'center', gap: '0.4rem' };
@@ -15,10 +16,18 @@ const navStyle = { display: 'flex', alignItems: 'center', gap: '0.4rem' };
 export default function AppLayout() {
   const { user, ownerEmail, clubs, logout } = useAuth();
   const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const navigate = useNavigate();
+  const clubIds = Object.keys(clubs);
+  const myClubs = useMyClubs(clubIds);
 
-  // The club links only mean anything to a member, so a visitor never sees
-  // them — and never sees a club's name in the chrome either.
-  const clubId = Object.keys(clubs)[0] || null;
+  // Follow the club you are actually looking at, falling back to your first
+  // one elsewhere in the app. The club links only mean anything to a member,
+  // so a visitor never sees them — nor a club's name in the chrome.
+  // Both matches run every render: `||` between two hook calls would skip one.
+  const exactMatch = useMatch('/club/:clubId');
+  const nestedMatch = useMatch('/club/:clubId/*');
+  const clubId = (exactMatch || nestedMatch)?.params?.clubId || clubIds[0] || null;
+  const activeClubName = myClubs.find((c) => c.id === clubId)?.name;
 
   return (
     <div>
@@ -33,7 +42,10 @@ export default function AppLayout() {
           >
             <FlamingoIcon size={32} />
             <span className="logo-lockup">
-              <span className="logo-eyebrow">Club de lectura · Flamingo Rock</span>
+              {/* Whose club you are in, once there can be more than one. */}
+              <span className="logo-eyebrow">
+                {activeClubName ? `Club de lectura · ${activeClubName}` : 'Club de lectura'}
+              </span>
               <span className="logo-title">Reseñas <em>Flamíngueras</em></span>
             </span>
           </Link>
@@ -42,6 +54,22 @@ export default function AppLayout() {
             className="header-actions"
             style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}
           >
+            {clubIds.length > 1 && (
+              // A switcher only earns its place once there is something to
+              // switch between.
+              <select
+                className="form-select"
+                style={{ fontSize: '0.85rem' }}
+                value={clubId || ''}
+                onChange={(e) => navigate(`/club/${e.target.value}`)}
+                aria-label="Cambiar de club"
+              >
+                {myClubs.map((club) => (
+                  <option key={club.id} value={club.id}>{club.name}</option>
+                ))}
+              </select>
+            )}
+
             {clubId && (
               <>
                 <NavLink end to={`/club/${clubId}`} className="btn btn-secondary" style={navStyle}>

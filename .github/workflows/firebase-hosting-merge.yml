@@ -33,6 +33,10 @@ jobs:
           VITE_GCP_API_KEY: ${{ secrets.VITE_GCP_API_KEY }}
           VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
 
+      # Pinned deliberately. `latest` meant every deploy ran whatever npm had
+      # published minutes earlier, with no review — and on 2026-08-05 that was
+      # firebase-tools 15.26.0, whose tarball 404s, which blocked every deploy.
+      # Bump this on purpose, not by accident.
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
@@ -40,6 +44,7 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_PROJECT_FLAMINGO_497112 }}
           channelId: live
           projectId: project-flamingo-497112
+          firebaseToolsVersion: "15.25.1"
 
       # Hosting alone is not the whole app: security rules and the callable
       # functions have to ship with the code that depends on them, or a merge
@@ -52,7 +57,7 @@ jobs:
       - name: Deploy Firestore and Storage rules
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
-        run: npx --yes firebase-tools@latest deploy --only firestore:rules,storage --project project-flamingo-497112 --non-interactive
+        run: npx --yes firebase-tools@15.25.1 deploy --only firestore:rules,storage --project project-flamingo-497112 --non-interactive
 
       # The CLI loads functions/index.js to discover what to deploy, so the
       # functions' own dependencies must exist locally — the root `npm ci`
@@ -65,4 +70,4 @@ jobs:
       - name: Deploy Cloud Functions
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
-        run: npx --yes firebase-tools@latest deploy --only functions --project project-flamingo-497112 --non-interactive
+        run: npx --yes firebase-tools@15.25.1 deploy --only functions --project project-flamingo-497112 --non-interactive

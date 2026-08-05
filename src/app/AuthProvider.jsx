@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from '../data/firebase';
 import { AuthContext } from './authContext';
@@ -35,11 +35,23 @@ export default function AuthProvider({ children }) {
     return () => unsubscribe();
   }, []);
 
+  // Joining or creating a club changes membership server-side; the claim on
+  // the token in hand still predates it. Callers refresh explicitly rather
+  // than the app polling for something that changes a handful of times ever.
+  const refreshClubs = useCallback(async () => {
+    if (!auth.currentUser) return {};
+    const token = await auth.currentUser.getIdTokenResult(true);
+    const next = token.claims.clubs || {};
+    setClubs(next);
+    return next;
+  }, []);
+
   const value = useMemo(
     () => ({
       user,
       ownerEmail: user ? (user.email || '').toLowerCase() : null,
       clubs,
+      refreshClubs,
       ready,
       logout: async () => {
         try {
@@ -49,7 +61,7 @@ export default function AuthProvider({ children }) {
         }
       },
     }),
-    [user, clubs, ready]
+    [user, clubs, ready, refreshClubs]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

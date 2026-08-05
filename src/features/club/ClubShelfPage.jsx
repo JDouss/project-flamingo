@@ -6,6 +6,7 @@ import BookCard from '../catalog/BookCard';
 import BookDetails from '../book-details/BookDetails';
 import AdminPanel from '../admin/AdminPanel';
 import SessionStudio from '../session-studio/SessionStudio';
+import InviteButton from './InviteButton';
 import { OpenBook } from '../../ui/ornaments';
 import Loading from '../../ui/Loading';
 import { bookToCard } from '../personal/readAdapter';
@@ -14,7 +15,7 @@ import { bookToCard } from '../personal/readAdapter';
 // what is on it. Only the club's books live here — a reader's own log belongs
 // to /biblioteca, which is where the two are brought together.
 export default function ClubShelfPage() {
-  const { clubId, books, loading, isClubAdmin } = useOutletContext();
+  const { clubId, club, books, loading, isClubAdmin } = useOutletContext();
 
   // Modal states
   const [isAdminOpen, setIsAdminOpen] = useState(false);
@@ -95,6 +96,7 @@ export default function ClubShelfPage() {
       {/* Club admin actions live with the club's data, not in the app header. */}
       {isClubAdmin && (
         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+          <InviteButton club={club} />
           <button className="btn btn-secondary" onClick={() => setIsStudioOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <Volume2 size={15} /> Sesión de Club
           </button>

@@ -350,6 +350,25 @@ export async function fetchVoiceNoteUrl(audioPath) {
   return getDownloadURL(ref(storage, audioPath));
 }
 
+// ---------- clubs ----------
+
+const createClubFn = httpsCallable(functions, "createClub", { timeout: 60000 });
+const joinClubFn = httpsCallable(functions, "joinClub", { timeout: 60000 });
+
+// Both go through callables because a membership document is not something a
+// client may write for itself — the rules say so, and that is the point.
+// The caller must refresh its ID token afterwards: club access is carried by
+// a custom claim, and the claim on the current token predates the membership.
+export async function createClub(name) {
+  const res = await createClubFn({ name });
+  return res.data;
+}
+
+export async function joinClub(inviteCode) {
+  const res = await joinClubFn({ inviteCode });
+  return res.data;
+}
+
 // ---------- migration (temporary) ----------
 
 // The one-off copy of Flamingo Rock into the clubs/users tree. Owner-only and
