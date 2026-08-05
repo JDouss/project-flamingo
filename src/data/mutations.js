@@ -5,6 +5,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  runTransaction,
 } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
@@ -55,14 +56,15 @@ const analyzeSessionFn = httpsCallable(functions, "analyzeSession", { timeout: 7
 // Fires a callable without tying the UI to its (minutes-long) completion.
 // The function reports progress/errors into the session doc itself; a
 // client-side invocation failure just leaves the doc stale, which the UI
-// detects and offers to retry.
-function invokePipeline(fn, payload, label) {
+// detects and offers to retry. `onFailure` lets a caller record that
+// invocation failure on its own doc instead of waiting for staleness.
+function invokePipeline(fn, payload, label, onFailure) {
   fn(payload).catch((err) => {
     // "deadline-exceeded" here only means the *client* stopped waiting for
     // the response; the function keeps running server-side.
-    if (err?.code !== "functions/deadline-exceeded") {
-      console.error(`${label} invocation failed:`, err);
-    }
+    if (err?.code === "functions/deadline-exceeded") return;
+    console.error(`${label} invocation failed:`, err);
+    onFailure?.(err);
   });
 }
 
@@ -245,11 +247,41 @@ export async function linkSessionToBook(sessionId, bookId) {
 
 const analyzeReadingNoteFn = httpsCallable(functions, "analyzeReadingNote", { timeout: 70000 });
 
+// An invocation that never reaches the analysis itself — signed-out session,
+// a rejected precondition, a dropped connection — leaves the doc sitting in
+// `queued`, where the UI spins for the whole 15-minute staleness window
+// before it offers a retry. Record the failure on the doc instead, so the
+// message and the retry button show up straight away.
+async function markNoteFailed(readId, err) {
+  const readRef = doc(db, READS_COLLECTION, readId);
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(readRef);
+      if (!snap.exists()) return;
+      // Once the function has claimed the doc it owns the outcome: it writes
+      // its own error on failure, so a connection that died *after* the call
+      // went through must not overwrite a live run or a finished one.
+      const status = snap.data().noteStatus;
+      if (status === "transcribing" || status === "ready") return;
+      tx.update(readRef, {
+        noteStatus: "error",
+        errorStage: "invocation",
+        error: err?.message || "No se pudo iniciar el análisis de la nota.",
+        updatedAt: new Date().toISOString(),
+      });
+    });
+  } catch (writeErr) {
+    console.error("Could not record note analysis failure:", writeErr);
+  }
+}
+
 // Same fire-and-forget contract as the club pipeline: the function keeps
 // running server-side and reports progress onto the doc, so closing the tab
 // mid-analysis loses nothing.
 export function requestNoteAnalysis(readId) {
-  invokePipeline(analyzeReadingNoteFn, { readId }, "analyzeReadingNote");
+  invokePipeline(analyzeReadingNoteFn, { readId }, "analyzeReadingNote", (err) =>
+    markNoteFailed(readId, err)
+  );
 }
 
 export async function savePersonalRead(readId, readData) {

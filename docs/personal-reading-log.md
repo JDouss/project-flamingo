@@ -120,7 +120,12 @@ reusing the existing Gemini helpers (`uploadToGeminiFiles`,
 
 Failures write `error`/`errorStage` onto the doc and the UI offers a retry —
 same contract as the club pipeline, so a browser that closes mid-run loses
-nothing.
+nothing. A call that never reaches the analysis (signed-out session, rejected
+precondition, dropped connection) is recorded by the *client* as
+`noteStatus: "error"` with `errorStage: "invocation"`, so the read does not sit
+in `queued` until the 15-minute staleness check notices. The client never
+overwrites a doc the function has already claimed (`transcribing`) or
+finished (`ready`).
 
 **Limits.** Voice notes are capped at 25 MB by the Storage rules (roughly 25
 minutes of Opus). Longer recordings belong in the club Session Studio, which
