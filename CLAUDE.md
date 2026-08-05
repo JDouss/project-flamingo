@@ -23,7 +23,7 @@ Guidance for agents working in this repository.
 ## Project notes
 
 - **Deploys are automatic on merge to `main`.** The workflow ships hosting, Firestore/Storage rules, and Cloud Functions together — the frontend must never depend on rules or functions that have not shipped with it.
-- **Cloud Functions run on Node 20, which is decommissioned 2026-10-30.** After that date functions deploys fail; `functions/package.json` needs bumping before then.
+- **Cloud Functions run on Node 22.** Node 20 was decommissioned 2026-10-30; keep `functions/package.json` ahead of the runtime deprecation schedule.
 - **`personal_reads` is private per owner.** Its Firestore rules scope every document to `ownerEmail`, and voice notes under `voice-notes/` are admin-read as well as admin-write — unlike club recordings, which are deliberately world-readable. Do not add a public-read path to either.
 - Feature docs live in `docs/`. See `docs/personal-reading-log.md` for Mi Biblioteca.
 - **An approved architecture refactor is planned but not yet implemented.** The full spec is `docs/architecture-refactor.md` — multi-club, private-by-default, unified personal library. If asked to implement it, follow that document's phases in order and obey its Guardrails section.
