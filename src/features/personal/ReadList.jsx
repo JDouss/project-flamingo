@@ -10,7 +10,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { noteStatus, isNoteWorking, isNoteStale } from '../../data/usePersonalReads';
-import { starsFromTen } from './readAdapter';
+import { starsFromTen, PERSONAL_SOURCE } from './readAdapter';
 
 const STATUS_LABELS = {
   completed: 'Terminado',
@@ -30,17 +30,20 @@ function formatDate(dateStr) {
 // Compact management row. The full read — insights, transcript, audio — lives
 // in PersonalReadDetails, the same modal the shelf opens, so there is one
 // detail view rather than two that drift apart.
-function ReadRow({ read, onOpen, onEdit }) {
-  const status = noteStatus(read);
-  const working = isNoteWorking(read);
-  const stale = isNoteStale(read);
-  const stars = starsFromTen(read.rating);
+function ReadRow({ item, onOpen, onEdit }) {
+  const read = item;
+  const isPersonal = item.source === PERSONAL_SOURCE;
+  // Voice-note state only means anything for a read you logged yourself.
+  const status = isPersonal ? noteStatus(item.read) : 'idle';
+  const working = isPersonal && isNoteWorking(item.read);
+  const stale = isPersonal && isNoteStale(item.read);
+  const stars = starsFromTen(item.myRating);
 
   return (
     <div
       className="glass-card"
       style={{ display: 'flex', gap: '1rem', padding: '0.9rem 1rem', alignItems: 'center', cursor: 'pointer' }}
-      onClick={() => onOpen(read)}
+      onClick={() => onOpen(item)}
     >
       <div style={{ width: '48px', height: '68px', flexShrink: 0, borderRadius: '4px', overflow: 'hidden' }}>
         {read.coverUrl ? (
@@ -86,6 +89,16 @@ function ReadRow({ read, onOpen, onEdit }) {
             color: 'var(--text-muted)',
           }}
         >
+          <span
+            style={{
+              border: '1px solid var(--border)',
+              borderRadius: '20px',
+              padding: '0.05rem 0.45rem',
+              color: isPersonal ? 'var(--text-muted)' : 'var(--primary)',
+            }}
+          >
+            {isPersonal ? 'Mi lectura' : item.clubName}
+          </span>
           <span>{STATUS_LABELS[read.status] || read.status}</span>
           {read.genre && <span>· {read.genre}</span>}
           {read.finishedAt && <span>· {formatDate(read.finishedAt)}</span>}
@@ -108,44 +121,58 @@ function ReadRow({ read, onOpen, onEdit }) {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
-        {read.rating != null && (
+        {item.myRating != null ? (
           <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-            <strong style={{ color: 'var(--primary)' }}>{Number(read.rating).toFixed(1)}</strong>
+            <strong style={{ color: 'var(--primary)' }}>{item.myRating.toFixed(1)}</strong>
             <Star size={13} fill="var(--accent-gold)" color="var(--accent-gold)" />
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>({stars}/5)</span>
           </span>
+        ) : (
+          !isPersonal && (
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }} title="No consta tu nota en esta sesión">
+              sin nota tuya
+            </span>
+          )
         )}
-        <button
-          type="button"
-          className="btn btn-secondary btn-icon"
-          style={{ width: '2rem', height: '2rem' }}
-          title="Editar"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit(read);
-          }}
-        >
-          <PenLine size={13} />
-        </button>
+        {/* A club book is edited on the club page, by an admin — not here. */}
+        {isPersonal && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-icon"
+            style={{ width: '2rem', height: '2rem' }}
+            title="Editar"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(item);
+            }}
+          >
+            <PenLine size={13} />
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-export default function ReadList({ reads, loading, onOpen, onEdit }) {
+export default function ReadList({ items, loading, onOpen, onEdit }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
 
-  const filtered = reads.filter((read) => {
+  const sources = [...new Set(items.map((i) => i.clubName).filter(Boolean))];
+
+  const filtered = items.filter((read) => {
     if (statusFilter && read.status !== statusFilter) return false;
+    if (sourceFilter === PERSONAL_SOURCE && read.source !== PERSONAL_SOURCE) return false;
+    if (sourceFilter && sourceFilter !== PERSONAL_SOURCE && read.clubName !== sourceFilter) return false;
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return (
       (read.title || '').toLowerCase().includes(q) ||
       (read.author || '').toLowerCase().includes(q) ||
       (read.genre || '').toLowerCase().includes(q) ||
-      (read.insights?.summary || '').toLowerCase().includes(q) ||
-      (read.transcript || '').toLowerCase().includes(q)
+      (read.summary || '').toLowerCase().includes(q) ||
+      (read.clubName || '').toLowerCase().includes(q)
     );
   });
 
@@ -157,14 +184,15 @@ export default function ReadList({ reads, loading, onOpen, onEdit }) {
     );
   }
 
-  if (reads.length === 0) {
+  if (items.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '3rem 1.5rem', color: 'var(--text-muted)' }}>
         <p className="serif-title" style={{ fontSize: '1.15rem', marginBottom: '0.5rem' }}>
           Tu biblioteca está vacía
         </p>
         <p style={{ fontSize: '0.9rem' }}>
-          Añade el primer libro que hayas leído por tu cuenta desde la pestaña «Nueva lectura».
+          Registra una lectura tuya, o pide a un administrador que enlace tu email en el
+          roster del club para que sus libros cuenten como tuyos.
         </p>
       </div>
     );
@@ -194,6 +222,20 @@ export default function ReadList({ reads, loading, onOpen, onEdit }) {
           <option value="reading">Leyendo</option>
           <option value="abandoned">Abandonados</option>
         </select>
+        {sources.length > 0 && (
+          <select
+            className="form-select"
+            style={{ fontSize: '0.85rem' }}
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+          >
+            <option value="">De todas partes</option>
+            <option value={PERSONAL_SOURCE}>Mis lecturas</option>
+            {sources.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {filtered.length === 0 ? (
@@ -201,8 +243,8 @@ export default function ReadList({ reads, loading, onOpen, onEdit }) {
           Ninguna lectura coincide con la búsqueda.
         </p>
       ) : (
-        filtered.map((read) => (
-          <ReadRow key={read.id} read={read} onOpen={onOpen} onEdit={onEdit} />
+        filtered.map((item) => (
+          <ReadRow key={`${item.source}-${item.id}`} item={item} onOpen={onOpen} onEdit={onEdit} />
         ))
       )}
     </div>

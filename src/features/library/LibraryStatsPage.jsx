@@ -4,11 +4,10 @@ import PersonalStats from '../personal/PersonalStats';
 import Loading from '../../ui/Loading';
 import { LibraryHeading } from './LibraryPage';
 
-// Personal stats as a page. P1 keeps them scoped to personal reads only;
-// merging in club reads is P4's job, once the adapter produces one card shape
-// for both sources.
+// Stats over the whole library — my own reads and the club books I was part
+// of reading, counted together.
 export default function LibraryStatsPage() {
-  const { reads, loading } = useOutletContext();
+  const { items, loading } = useOutletContext();
 
   return (
     <main className="container" style={{ paddingTop: '2.5rem' }}>
@@ -18,7 +17,7 @@ export default function LibraryStatsPage() {
         </NavLink>
       </LibraryHeading>
 
-      {loading ? <Loading label="Contando tus lecturas…" /> : <PersonalStats reads={reads} />}
+      {loading ? <Loading label="Contando tus lecturas…" /> : <PersonalStats items={items} />}
     </main>
   );
 }

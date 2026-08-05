@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, Save, Loader2, Plus, Trash2 } from 'lucide-react';
+import { User, Save, Loader2, Plus, Trash2, Link2 } from 'lucide-react';
 import { useRoster } from '../../data/useClub';
 
 // The club roster: the humans who appear in the grade tables, plus the persona
@@ -50,6 +50,15 @@ export default function MembersRegistry({ clubId }) {
       return;
     }
 
+    // Likewise for emails: an account linked to two roster entries would make
+    // "my grade" ambiguous in that reader's own library.
+    const emails = cleaned.map((d) => d.email).filter(Boolean);
+    const duplicateEmail = emails.find((e, i) => emails.indexOf(e) !== i);
+    if (duplicateEmail) {
+      setError(`El email ${duplicateEmail} está enlazado a dos personas del roster.`);
+      return;
+    }
+
     setSaving(true);
     setError('');
     try {
@@ -78,7 +87,9 @@ export default function MembersRegistry({ clubId }) {
       </h4>
       <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: 1.6 }}>
         Los nombres son la clave con la que se guardan las notas de cada sesión: cámbialos
-        sólo si sabes lo que haces. El rasgo ayuda a la IA a atribuir opiniones.
+        sólo si sabes lo que haces. El rasgo ayuda a la IA a atribuir opiniones. Y el email
+        enlaza a esa persona con su cuenta: a partir de ahí, los libros del club aparecen en
+        <strong> su biblioteca</strong> con la nota que puso en la sesión.
       </p>
 
       {error && (
@@ -117,8 +128,22 @@ export default function MembersRegistry({ clubId }) {
               placeholder="Rasgo lector (opcional)"
               value={entry.personaHint || ''}
               onChange={(e) => updateDraft(index, 'personaHint', e.target.value)}
-              style={{ flex: '2 1 14rem', fontSize: '0.85rem' }}
+              style={{ flex: '2 1 12rem', fontSize: '0.85rem' }}
             />
+            <span
+              title="Email de su cuenta — enlaza sus notas con su biblioteca"
+              style={{ display: 'inline-flex', alignItems: 'center', flex: '1 1 12rem', gap: '0.35rem' }}
+            >
+              <Link2 size={13} style={{ color: entry.email ? 'var(--sage)' : 'var(--text-muted)', flexShrink: 0 }} />
+              <input
+                className="form-input"
+                type="email"
+                placeholder="email (opcional)"
+                value={entry.email || ''}
+                onChange={(e) => updateDraft(index, 'email', e.target.value)}
+                style={{ width: '100%', fontSize: '0.85rem' }}
+              />
+            </span>
             <button
               type="button"
               className="btn btn-secondary btn-icon"

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { onSnapshot, updateDoc } from "firebase/firestore";
-import { clubDoc, clubMemberDoc } from "./paths";
+import { clubBooksCollection, clubDoc, clubMemberDoc } from "./paths";
 
 // The club document: name, invite code and roster. Members can read it;
 // only admins can write, which the rules enforce.
@@ -82,4 +82,65 @@ export function useRoster(clubId) {
   );
 
   return { roster, loading, saveRoster };
+}
+
+// Every club I belong to, with its books — the club half of my library.
+// One subscription pair per club; at a handful of clubs that is cheaper than
+// any index-backed alternative, and it keeps the library live.
+export function useMyClubLibraries(clubIds, email) {
+  const [libraries, setLibraries] = useState([]);
+  const [loading, setLoading] = useState(clubIds.length > 0);
+  // Effects key off the joined ids: a fresh array with the same contents
+  // must not tear down and rebuild every subscription.
+  const key = clubIds.join(",");
+
+  useEffect(() => {
+    const ids = key ? key.split(",") : [];
+    if (ids.length === 0 || !email) {
+      setLibraries([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    const state = new Map(ids.map((id) => [id, { club: null, books: null }]));
+    const emit = () => {
+      const ready = [...state.entries()]
+        .filter(([, v]) => v.club && v.books)
+        .map(([, v]) => v);
+      setLibraries(ready);
+      // Usable as soon as every club has reported, rather than waiting on
+      // whichever subscription is slowest to settle afterwards.
+      if (ready.length === ids.length) setLoading(false);
+    };
+
+    const unsubscribes = ids.flatMap((clubId) => [
+      onSnapshot(
+        clubDoc(clubId),
+        (snap) => {
+          state.get(clubId).club = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+          emit();
+        },
+        (err) => {
+          console.error(`Failed to load club ${clubId}:`, err);
+          setLoading(false);
+        }
+      ),
+      onSnapshot(
+        clubBooksCollection(clubId),
+        (snap) => {
+          state.get(clubId).books = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          emit();
+        },
+        (err) => {
+          console.error(`Failed to load books for club ${clubId}:`, err);
+          setLoading(false);
+        }
+      ),
+    ]);
+
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [key, email]);
+
+  return { libraries, loading };
 }

@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
 import AuthProvider from './AuthProvider';
 import AppLayout from './AppLayout';
@@ -5,7 +6,8 @@ import { useAuth } from './authContext';
 import { DEFAULT_CLUB_ID } from './clubs';
 import { useBooks } from '../data/useBooks';
 import { usePersonalReads } from '../data/usePersonalReads';
-import { useClubDoc, useClubMembership } from '../data/useClub';
+import { useClubDoc, useClubMembership, useMyClubLibraries } from '../data/useClub';
+import { myLibrary } from '../features/personal/readAdapter';
 import Loading from '../ui/Loading';
 import LandingPage from '../features/landing/LandingPage';
 import ClubShelfPage from '../features/club/ClubShelfPage';
@@ -47,16 +49,29 @@ function ClubLayout() {
   );
 }
 
-// A reader's own library. Every signed-in account has one now: the reads live
-// under their own email, so there is nothing to share and nothing to leak.
+// A reader's own library: their personal log plus the finished books of every
+// club that links their email in its roster. The union is computed here and
+// never stored — a club book belongs to the club, and only appears here
+// because the reader was part of reading it.
 function LibraryLayout() {
-  const { ownerEmail, ready } = useAuth();
+  const { ownerEmail, clubs, ready } = useAuth();
   const { reads, loading, error } = usePersonalReads(ownerEmail);
+  const clubIds = useMemo(() => Object.keys(clubs), [clubs]);
+  const { libraries, loading: clubsLoading } = useMyClubLibraries(clubIds, ownerEmail);
+
+  const items = useMemo(
+    () => myLibrary(reads, libraries, ownerEmail),
+    [reads, libraries, ownerEmail]
+  );
 
   if (!ready) return <Loading label="Abriendo tu biblioteca…" />;
   if (!ownerEmail) return <Navigate to="/" replace />;
 
-  return <Outlet context={{ ownerEmail, reads, loading, error }} />;
+  return (
+    <Outlet
+      context={{ ownerEmail, reads, items, loading: loading || clubsLoading, error }}
+    />
+  );
 }
 
 // Temporary: the migration page is for whoever administers the first club.
