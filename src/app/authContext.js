@@ -7,6 +7,9 @@ import { createContext, useContext } from "react";
 export const AuthContext = createContext({
   user: null,
   ownerEmail: null,
+  // Signed in is not the same as allowed to act: `user` answers "who is
+  // this?", `isAdmin` answers "may they edit the club?".
+  isAdmin: false,
   ready: false,
   logout: () => {},
 });

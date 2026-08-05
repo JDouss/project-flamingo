@@ -56,6 +56,81 @@ service cloud.firestore {
         && ownerEmail() == request.resource.data.ownerEmail;
     }
 
+    // ---------------------------------------------------------------------
+    // New tree: users and clubs. Nothing reads or writes these yet — the
+    // frontend still uses the legacy collections above — but the rules ship
+    // first so the migration has somewhere safe to land.
+    //
+    // There is deliberately NO public-read clause anywhere below: club
+    // content is visible only to authenticated members of that club, and a
+    // user's own documents only to them. Creating and joining clubs happens
+    // through callables (Admin SDK, bypasses these rules), never by a client
+    // writing a membership doc for itself.
+    // ---------------------------------------------------------------------
+
+    function signedInEmail() {
+      return request.auth != null && request.auth.token.email != null
+        ? request.auth.token.email.lower()
+        : null;
+    }
+
+    function isSelf(email) {
+      return signedInEmail() != null && signedInEmail() == email;
+    }
+
+    // An update must leave the doc owned by the same person. The path already
+    // scopes it, so this is defense in depth for the `ownerEmail` field the
+    // reads carry.
+    function ownerEmailUnchanged() {
+      return !('ownerEmail' in resource.data)
+        || request.resource.data.ownerEmail == resource.data.ownerEmail;
+    }
+
+    function isClubMember(clubId) {
+      return signedInEmail() != null
+        && exists(/databases/$(database)/documents/clubs/$(clubId)/members/$(signedInEmail()));
+    }
+
+    // The membership read is guarded by exists() first: get() on a missing
+    // document errors, and && short-circuits.
+    function isClubAdmin(clubId) {
+      return isClubMember(clubId)
+        && get(/databases/$(database)/documents/clubs/$(clubId)/members/$(signedInEmail())).data.role == 'admin';
+    }
+
+    // A user's own namespace: profile plus their reading log.
+    match /users/{email} {
+      allow read, create, update, delete: if isSelf(email);
+
+      match /{document=**} {
+        allow read, create, delete: if isSelf(email);
+        allow update: if isSelf(email) && ownerEmailUnchanged();
+      }
+    }
+
+    // A club and everything under it. Members read, admins write.
+    match /clubs/{clubId} {
+      allow read: if isClubMember(clubId);
+      allow write: if isClubAdmin(clubId);
+
+      match /members/{memberEmail} {
+        allow read: if isClubMember(clubId);
+        allow write: if isClubAdmin(clubId);
+      }
+
+      match /books/{bookId} {
+        allow read: if isClubMember(clubId);
+        allow write: if isClubAdmin(clubId);
+      }
+
+      // As with the legacy sessions: clients create the placeholder and edit
+      // drafts, the Cloud Function writes the rest with the Admin SDK.
+      match /sessions/{sessionId} {
+        allow read: if isClubMember(clubId);
+        allow create, update, delete: if isClubAdmin(clubId);
+      }
+    }
+
     // Deny everything else.
     match /{document=**} {
       allow read, write: if false;

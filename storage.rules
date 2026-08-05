@@ -51,6 +51,54 @@ service firebase.storage {
       allow write: if false;
     }
 
+    // -----------------------------------------------------------------------
+    // New tree: club-scoped media and per-user voice notes. Nothing writes
+    // here yet — the frontend still uses the legacy paths above — but the
+    // rules ship with the data model so the flip has somewhere to land.
+    //
+    // Storage rules cannot read Firestore, so club membership arrives as a
+    // custom claim: { clubs: { flamingo: 'admin', otro: 'member' } }, kept in
+    // sync by the syncClubClaims trigger. Claims go stale until the client
+    // refreshes its token, which is why joining refreshes it explicitly.
+    // -----------------------------------------------------------------------
+
+    // Both key tests use `in`: reading an absent property off the token throws
+    // instead of returning null, and a user who belongs to no club has no
+    // `clubs` claim at all. The throw would still deny, but by accident.
+    function inClub(clubId) {
+      return request.auth != null
+        && 'clubs' in request.auth.token
+        && clubId in request.auth.token.clubs;
+    }
+
+    function isOwner(email) {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() == email;
+    }
+
+    match /clubs/{clubId}/recordings/{allPaths=**} {
+      allow read: if inClub(clubId);
+      allow write: if inClub(clubId)
+        && request.resource.size < 100 * 1024 * 1024
+        && request.resource.contentType.matches('audio/.*');
+    }
+
+    // Written only by the Cloud Function (Admin SDK bypasses rules).
+    match /clubs/{clubId}/transcripts/{allPaths=**} {
+      allow read: if inClub(clubId);
+      allow write: if false;
+    }
+
+    // Personal audio, private to its owner — never world-readable, unlike
+    // club recordings.
+    match /users/{email}/voice-notes/{allPaths=**} {
+      allow read: if isOwner(email);
+      allow write: if isOwner(email)
+        && request.resource.size < 25 * 1024 * 1024
+        && request.resource.contentType.matches('audio/.*');
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

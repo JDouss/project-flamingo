@@ -25,11 +25,14 @@
  */
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { logger } from "firebase-functions";
 import { initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+import { randomBytes } from "node:crypto";
 import { fetch, Agent, setGlobalDispatcher } from "undici";
 import { spawn } from "node:child_process";
 import { mkdtemp, writeFile, readFile, readdir, rm } from "node:fs/promises";
@@ -54,6 +57,13 @@ const GEMINI_BASE = "https://generativelanguage.googleapis.com";
 const SESSIONS_COLLECTION = "transcriptions";
 const MEMBERS_COLLECTION = "speakers_registry";
 const READS_COLLECTION = "personal_reads";
+
+// New tree (see docs/architecture-refactor.md). Nothing in the frontend reads
+// these yet; the migration below is what first populates them.
+const CLUBS_COLLECTION = "clubs";
+const USERS_COLLECTION = "users";
+const FLAMINGO_CLUB_ID = "flamingo";
+const FLAMINGO_CLUB_NAME = "Flamingo Rock";
 
 // Keep in sync with firestore.rules / storage.rules.
 const ADMIN_EMAILS = ["doussinague95@gmail.com"];
@@ -914,4 +924,272 @@ export const analyzeReadingNote = onCall(NOTE_CALL_OPTS, async (request) => {
       .catch(() => {});
     throw new HttpsError("internal", err.message || "Voice note analysis failed.");
   }
+});
+
+// ---------------------------------------------------------------------------
+// Clubs: creation, joining, claim sync, and the one-off Flamingo migration
+//
+// These are the server side of the architecture refactor's new data model.
+// They run "dark": the frontend still talks to the legacy collections, and
+// nothing here touches them except to READ them during migration. Sources are
+// never modified or deleted — the copy is additive and re-runnable.
+// ---------------------------------------------------------------------------
+
+// No Gemini, no ffmpeg, no hour-long work: a few reads and writes.
+const CLUB_CALL_OPTS = {
+  region: "europe-west1",
+  memory: "256MiB",
+  timeoutSeconds: 60,
+};
+
+// The migration walks whole collections, so it gets room and time.
+const MIGRATION_CALL_OPTS = {
+  region: "europe-west1",
+  memory: "512MiB",
+  timeoutSeconds: 540,
+};
+
+// Firestore caps a batch at 500 writes.
+const BATCH_LIMIT = 400;
+
+function callerEmail(request) {
+  const email = request.auth?.token?.email?.toLowerCase();
+  if (!email) {
+    throw new HttpsError("unauthenticated", "Necesitas iniciar sesión.");
+  }
+  return email;
+}
+
+// No I/O/0/1: an invite code gets read aloud and typed by hand. 32 symbols
+// divide 256 evenly, so the byte-modulo draw stays uniform.
+const INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+function newInviteCode(length = 8) {
+  const bytes = randomBytes(length);
+  let code = "";
+  for (let i = 0; i < length; i++) {
+    code += INVITE_ALPHABET[bytes[i] % INVITE_ALPHABET.length];
+  }
+  return code;
+}
+
+async function uniqueInviteCode(db) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = newInviteCode();
+    const clash = await db.collection(CLUBS_COLLECTION).where("inviteCode", "==", code).limit(1).get();
+    if (clash.empty) return code;
+  }
+  throw new HttpsError("internal", "No se pudo generar un código de invitación.");
+}
+
+function slugify(name) {
+  return name
+    .normalize("NFD")
+    // Strip the combining accents NFD just split off.
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+export const createClub = onCall(CLUB_CALL_OPTS, async (request) => {
+  const email = callerEmail(request);
+  const name = String(request.data?.name || "").trim();
+  if (!name) {
+    throw new HttpsError("invalid-argument", "El club necesita un nombre.");
+  }
+  if (name.length > 80) {
+    throw new HttpsError("invalid-argument", "El nombre del club es demasiado largo.");
+  }
+
+  const db = getFirestore();
+  const now = new Date().toISOString();
+  const clubRef = db.collection(CLUBS_COLLECTION).doc();
+  const inviteCode = await uniqueInviteCode(db);
+
+  await clubRef.set({
+    name,
+    slug: slugify(name),
+    inviteCode,
+    createdBy: email,
+    createdAt: now,
+    // Roster entries are the humans in the club's ritual; members are login
+    // accounts. They are different sets, and the roster starts empty.
+    roster: [],
+  });
+  await clubRef.collection("members").doc(email).set({ role: "admin", joinedAt: now });
+
+  logger.info(`Club ${clubRef.id} ("${name}") created by ${email}.`);
+  return { clubId: clubRef.id, inviteCode };
+});
+
+export const joinClub = onCall(CLUB_CALL_OPTS, async (request) => {
+  const email = callerEmail(request);
+  const inviteCode = String(request.data?.inviteCode || "").trim().toUpperCase();
+  if (!inviteCode) {
+    throw new HttpsError("invalid-argument", "Falta el código de invitación.");
+  }
+
+  const db = getFirestore();
+  const snap = await db
+    .collection(CLUBS_COLLECTION)
+    .where("inviteCode", "==", inviteCode)
+    .limit(1)
+    .get();
+  if (snap.empty) {
+    throw new HttpsError("not-found", "Ese código de invitación no existe.");
+  }
+
+  const clubDoc = snap.docs[0];
+  const memberRef = clubDoc.ref.collection("members").doc(email);
+  const existing = await memberRef.get();
+
+  // Re-joining is a no-op, and must never demote an admin back to member.
+  if (!existing.exists) {
+    await memberRef.set({ role: "member", joinedAt: new Date().toISOString() });
+    logger.info(`${email} joined club ${clubDoc.id}.`);
+  }
+
+  return {
+    clubId: clubDoc.id,
+    name: clubDoc.data().name,
+    role: existing.exists ? existing.data().role : "member",
+  };
+});
+
+// Storage rules cannot read Firestore, so membership is mirrored onto the
+// user's ID token as { clubs: { clubId: role } }. Rebuilt from scratch on
+// every membership write, which is correct for create, update and delete
+// alike without any special-casing.
+export const syncClubClaims = onDocumentWritten(
+  { region: "europe-west1", memory: "256MiB", document: "clubs/{clubId}/members/{email}" },
+  async (event) => {
+    const email = event.params.email;
+    const db = getFirestore();
+
+    // A collection-group query would need an index this deploy pipeline does
+    // not ship (it deploys rules, not indexes). At a handful of clubs, one
+    // lookup per club is cheaper than that dependency.
+    const clubsSnap = await db.collection(CLUBS_COLLECTION).get();
+    const memberships = await Promise.all(
+      clubsSnap.docs.map(async (clubDoc) => {
+        const snap = await clubDoc.ref.collection("members").doc(email).get();
+        if (!snap.exists) return null;
+        return [clubDoc.id, snap.data().role === "admin" ? "admin" : "member"];
+      })
+    );
+    const clubs = Object.fromEntries(memberships.filter(Boolean));
+
+    let user;
+    try {
+      user = await getAuth().getUserByEmail(email);
+    } catch {
+      // A membership can exist for someone who has never signed in; there is
+      // no auth user to carry claims yet. The claim is only needed for
+      // Storage, and joining (which is what creates memberships in practice)
+      // always happens from a signed-in session.
+      logger.info(`syncClubClaims: no auth user for ${email} yet; nothing to update.`);
+      return;
+    }
+
+    await getAuth().setCustomUserClaims(user.uid, { clubs });
+    logger.info(`syncClubClaims: ${email} now in ${Object.keys(clubs).length} club(s).`);
+  }
+);
+
+// Copies every doc of `source` into `target`, keeping ids and payloads
+// byte-identical. Overwrites on re-run; never deletes anything.
+async function copyCollection(db, sourceRef, targetRef, mapTarget) {
+  const snap = await sourceRef.get();
+  let copied = 0;
+
+  for (let i = 0; i < snap.docs.length; i += BATCH_LIMIT) {
+    const batch = db.batch();
+    for (const doc of snap.docs.slice(i, i + BATCH_LIMIT)) {
+      const dest = mapTarget ? mapTarget(doc) : targetRef.doc(doc.id);
+      batch.set(dest, doc.data());
+      copied++;
+    }
+    await batch.commit();
+  }
+
+  return { source: snap.size, copied };
+}
+
+// One-off, owner-only, idempotent: copies Flamingo Rock into the new tree.
+// Sources survive untouched — the legacy collections stay readable until the
+// copy has been verified and the frontend has moved over. Deleted in P6.
+export const migrateFlamingo = onCall(MIGRATION_CALL_OPTS, async (request) => {
+  const email = callerEmail(request);
+  if (!ADMIN_EMAILS.includes(email)) {
+    throw new HttpsError("permission-denied", "Solo el propietario puede ejecutar la migración.");
+  }
+
+  const db = getFirestore();
+  const now = new Date().toISOString();
+  const clubRef = db.collection(CLUBS_COLLECTION).doc(FLAMINGO_CLUB_ID);
+  const existingClub = await clubRef.get();
+  const existingData = existingClub.exists ? existingClub.data() : {};
+
+  // Roster comes from speakers_registry with no email links. A re-run must
+  // not undo the links an admin has since made by hand, so existing emails
+  // are carried over by roster name.
+  const registrySnap = await db.collection(MEMBERS_COLLECTION).get();
+  const linkedByName = new Map(
+    (existingData.roster || []).map((entry) => [entry.name, entry.email || null])
+  );
+  const roster = registrySnap.docs.map((doc) => {
+    const data = doc.data();
+    const name = data.name || doc.id;
+    return {
+      name,
+      personaHint: data.personaHint || data.persona || "",
+      email: linkedByName.get(name) || null,
+    };
+  });
+
+  await clubRef.set({
+    name: existingData.name || FLAMINGO_CLUB_NAME,
+    slug: existingData.slug || slugify(FLAMINGO_CLUB_NAME),
+    // Keep any code already handed out; only mint one on the first run.
+    inviteCode: existingData.inviteCode || (await uniqueInviteCode(db)),
+    createdBy: existingData.createdBy || email,
+    createdAt: existingData.createdAt || now,
+    roster,
+  });
+
+  const memberRef = clubRef.collection("members").doc(email);
+  const existingMember = await memberRef.get();
+  await memberRef.set({
+    role: "admin",
+    joinedAt: existingMember.exists ? existingMember.data().joinedAt || now : now,
+  });
+
+  const books = await copyCollection(db, db.collection("books"), clubRef.collection("books"));
+  const sessions = await copyCollection(
+    db,
+    db.collection(SESSIONS_COLLECTION),
+    clubRef.collection("sessions")
+  );
+
+  // Reads are routed by the owner recorded on each doc, not by the caller, so
+  // a doc belonging to someone else would still land in the right library.
+  const readsSource = db.collection(READS_COLLECTION);
+  const owners = new Set();
+  const reads = await copyCollection(db, readsSource, null, (doc) => {
+    const owner = (doc.data().ownerEmail || email).toLowerCase();
+    owners.add(owner);
+    return db.collection(USERS_COLLECTION).doc(owner).collection("reads").doc(doc.id);
+  });
+
+  // A reader's profile doc is the parent of their reads; create it without
+  // disturbing one that already exists.
+  for (const owner of owners) {
+    await db.collection(USERS_COLLECTION).doc(owner).set({ createdAt: now }, { merge: true });
+  }
+
+  const result = { clubId: FLAMINGO_CLUB_ID, roster: roster.length, books, sessions, reads };
+  logger.info(`migrateFlamingo by ${email}: ${JSON.stringify(result)}`);
+  return result;
 });
