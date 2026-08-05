@@ -1,15 +1,18 @@
-import {
-  collection,
-  doc,
-  addDoc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  runTransaction,
-} from "firebase/firestore";
+import { doc, addDoc, setDoc, updateDoc, deleteDoc, runTransaction } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
-import { db, storage, functions, SESSIONS_COLLECTION, READS_COLLECTION } from "./firebase";
+import { db, storage, functions } from "./firebase";
+import {
+  clubBookDoc,
+  clubBooksCollection,
+  clubSessionDoc,
+  clubSessionsCollection,
+  coverPath,
+  recordingPath,
+  userReadDoc,
+  userReadsCollection,
+  voiceNotePath,
+} from "./paths";
 
 // ---------- helpers ----------
 
@@ -68,29 +71,29 @@ function invokePipeline(fn, payload, label, onFailure) {
   });
 }
 
-export function requestTranscription(sessionId) {
-  invokePipeline(transcribeSessionFn, { sessionId }, "transcribeSession");
+export function requestTranscription(clubId, sessionId) {
+  invokePipeline(transcribeSessionFn, { clubId, sessionId }, "transcribeSession");
 }
 
 // `grades` is the human-confirmed list: [{ member, round: 'start'|'end', value }]
-export function requestAnalysis(sessionId, grades) {
-  invokePipeline(analyzeSessionFn, { sessionId, grades }, "analyzeSession");
+export function requestAnalysis(clubId, sessionId, grades) {
+  invokePipeline(analyzeSessionFn, { clubId, sessionId, grades }, "analyzeSession");
 }
 
 // Retry a stuck or failed session at the right stage. A transcription-stage
 // failure always re-transcribes, even if older stage data exists from a
 // previous run — otherwise the retry would "resume" over stale data.
-export async function retrySession(session) {
+export async function retrySession(clubId, session) {
   if (session.errorStage === "transcription" || !session.transcriptPath) {
-    requestTranscription(session.id);
+    requestTranscription(clubId, session.id);
     return "transcribing";
   }
   if (session.confirmedGrades) {
-    requestAnalysis(session.id, session.confirmedGrades);
+    requestAnalysis(clubId, session.id, session.confirmedGrades);
     return "analyzing";
   }
   // Transcript exists but grades were never confirmed: reopen the grading step.
-  await updateDoc(doc(db, SESSIONS_COLLECTION, session.id), {
+  await updateDoc(clubSessionDoc(clubId, session.id), {
     status: "needs_grading",
     error: null,
     errorStage: null,
@@ -100,8 +103,8 @@ export async function retrySession(session) {
 }
 
 // Reopen the grade-assignment step from a draft (e.g. a mark was misassigned).
-export async function reopenGrading(sessionId) {
-  await updateDoc(doc(db, SESSIONS_COLLECTION, sessionId), {
+export async function reopenGrading(clubId, sessionId) {
+  await updateDoc(clubSessionDoc(clubId, sessionId), {
     status: "needs_grading",
     updatedAt: new Date().toISOString(),
   });
@@ -109,9 +112,9 @@ export async function reopenGrading(sessionId) {
 
 // Creates the session placeholder doc, uploads the audio, then kicks off
 // the transcription function.
-export async function startSessionUpload(file, onProgress) {
-  const sessionRef = doc(collection(db, SESSIONS_COLLECTION));
-  const audioPath = `recordings/${sessionRef.id}/${file.name}`;
+export async function startSessionUpload(clubId, file, onProgress) {
+  const sessionRef = doc(clubSessionsCollection(clubId));
+  const audioPath = recordingPath(clubId, sessionRef.id, file.name);
 
   await setDoc(sessionRef, {
     status: "uploading",
@@ -139,23 +142,23 @@ export async function startSessionUpload(file, onProgress) {
     throw err;
   }
 
-  requestTranscription(sessionRef.id);
+  requestTranscription(clubId, sessionRef.id);
   return sessionRef.id;
 }
 
-export async function updateSessionDraft(sessionId, analysis) {
-  await updateDoc(doc(db, SESSIONS_COLLECTION, sessionId), {
+export async function updateSessionDraft(clubId, sessionId, analysis) {
+  await updateDoc(clubSessionDoc(clubId, sessionId), {
     analysis,
     updatedAt: new Date().toISOString(),
   });
 }
 
-export async function deleteSession(sessionId) {
-  await deleteDoc(doc(db, SESSIONS_COLLECTION, sessionId));
+export async function deleteSession(clubId, sessionId) {
+  await deleteDoc(clubSessionDoc(clubId, sessionId));
 }
 
-async function markSessionPublished(sessionId, bookId) {
-  await updateDoc(doc(db, SESSIONS_COLLECTION, sessionId), {
+async function markSessionPublished(clubId, sessionId, bookId) {
+  await updateDoc(clubSessionDoc(clubId, sessionId), {
     status: "published",
     bookId,
     updatedAt: new Date().toISOString(),
@@ -163,11 +166,11 @@ async function markSessionPublished(sessionId, bookId) {
 }
 
 // Publish a reviewed session draft as a brand-new book review.
-export async function publishSessionAsNewBook(session, analysis) {
+export async function publishSessionAsNewBook(clubId, session, analysis) {
   const today = new Date().toISOString().split("T")[0];
   const grades = analysis.grades || { start: {}, end: {} };
 
-  const bookRef = await addDoc(collection(db, "books"), {
+  const bookRef = await addDoc(clubBooksCollection(clubId), {
     title: (analysis.bookTitle || "Nueva Reseña de Sesión").trim(),
     author: (analysis.bookAuthor || "Autor Desconocido").trim(),
     genre: (analysis.genre || "Debate").trim(),
@@ -189,12 +192,12 @@ export async function publishSessionAsNewBook(session, analysis) {
     updatedAt: new Date().toISOString(),
   });
 
-  await markSessionPublished(session.id, bookRef.id);
+  await markSessionPublished(clubId, session.id, bookRef.id);
   return bookRef.id;
 }
 
 // Publish a reviewed session draft onto an existing book review.
-export async function publishSessionToBook(session, analysis, book) {
+export async function publishSessionToBook(clubId, session, analysis, book) {
   const grades = analysis.grades || { start: {}, end: {} };
   const update = {
     privateNotes: analysis.sessionSummaryMarkdown || "",
@@ -211,33 +214,32 @@ export async function publishSessionToBook(session, analysis, book) {
     update.summary = analysis.generalSummary;
   }
 
-  await updateDoc(doc(db, "books", book.id), update);
-  await markSessionPublished(session.id, book.id);
+  await updateDoc(clubBookDoc(clubId, book.id), update);
+  await markSessionPublished(clubId, session.id, book.id);
   return book.id;
 }
 
 // ---------- books ----------
 
-export async function saveBook(bookId, bookData) {
+export async function saveBook(clubId, bookId, bookData) {
   if (bookId) {
-    await updateDoc(doc(db, "books", bookId), bookData);
+    await updateDoc(clubBookDoc(clubId, bookId), bookData);
     return bookId;
   }
-  const bookRef = await addDoc(collection(db, "books"), bookData);
+  const bookRef = await addDoc(clubBooksCollection(clubId), bookData);
   return bookRef.id;
 }
 
-export async function deleteBook(bookId) {
-  await deleteDoc(doc(db, "books", bookId));
+export async function deleteBook(clubId, bookId) {
+  await deleteDoc(clubBookDoc(clubId, bookId));
 }
 
 export async function uploadCover(file, onProgress) {
-  const path = `covers/${Date.now()}_${file.name}`;
-  return uploadWithProgress(ref(storage, path), file, onProgress);
+  return uploadWithProgress(ref(storage, coverPath(file.name)), file, onProgress);
 }
 
-export async function linkSessionToBook(sessionId, bookId) {
-  await updateDoc(doc(db, SESSIONS_COLLECTION, sessionId), {
+export async function linkSessionToBook(clubId, sessionId, bookId) {
+  await updateDoc(clubSessionDoc(clubId, sessionId), {
     bookId,
     updatedAt: new Date().toISOString(),
   });
@@ -252,8 +254,8 @@ const analyzeReadingNoteFn = httpsCallable(functions, "analyzeReadingNote", { ti
 // `queued`, where the UI spins for the whole 15-minute staleness window
 // before it offers a retry. Record the failure on the doc instead, so the
 // message and the retry button show up straight away.
-async function markNoteFailed(readId, err) {
-  const readRef = doc(db, READS_COLLECTION, readId);
+async function markNoteFailed(ownerEmail, readId, err) {
+  const readRef = userReadDoc(ownerEmail, readId);
   try {
     await runTransaction(db, async (tx) => {
       const snap = await tx.get(readRef);
@@ -278,26 +280,26 @@ async function markNoteFailed(readId, err) {
 // Same fire-and-forget contract as the club pipeline: the function keeps
 // running server-side and reports progress onto the doc, so closing the tab
 // mid-analysis loses nothing.
-export function requestNoteAnalysis(readId) {
+export function requestNoteAnalysis(ownerEmail, readId) {
   invokePipeline(analyzeReadingNoteFn, { readId }, "analyzeReadingNote", (err) =>
-    markNoteFailed(readId, err)
+    markNoteFailed(ownerEmail, readId, err)
   );
 }
 
-export async function savePersonalRead(readId, readData) {
+export async function savePersonalRead(ownerEmail, readId, readData) {
   if (readId) {
-    await updateDoc(doc(db, READS_COLLECTION, readId), readData);
+    await updateDoc(userReadDoc(ownerEmail, readId), readData);
     return readId;
   }
-  const readRef = await addDoc(collection(db, READS_COLLECTION), readData);
+  const readRef = await addDoc(userReadsCollection(ownerEmail), readData);
   return readRef.id;
 }
 
 // Voice notes live under a private Storage prefix (see storage.rules) keyed
 // by read id, so deleting a read can clean up after itself.
-export async function uploadVoiceNote(readId, file, onProgress) {
+export async function uploadVoiceNote(ownerEmail, readId, file, onProgress) {
   const safeName = file.name.replace(/[^\w.-]+/g, "_");
-  const audioPath = `voice-notes/${readId}/${Date.now()}_${safeName}`;
+  const audioPath = voiceNotePath(ownerEmail, readId, `${Date.now()}_${safeName}`);
   await uploadWithProgress(ref(storage, audioPath), file, onProgress);
   return { audioPath, audioName: file.name, uploadedAt: new Date().toISOString() };
 }
@@ -311,17 +313,17 @@ export async function deleteVoiceNoteAudio(audioPath) {
 }
 
 // Attach (or replace) a voice note and kick off the analysis.
-export async function attachVoiceNote(readId, file, onProgress, previousAudioPath) {
-  await updateDoc(doc(db, READS_COLLECTION, readId), {
+export async function attachVoiceNote(ownerEmail, readId, file, onProgress, previousAudioPath) {
+  await updateDoc(userReadDoc(ownerEmail, readId), {
     noteStatus: "uploading",
     error: null,
     errorStage: null,
     updatedAt: new Date().toISOString(),
   });
 
-  const voiceNote = await uploadVoiceNote(readId, file, onProgress);
+  const voiceNote = await uploadVoiceNote(ownerEmail, readId, file, onProgress);
 
-  await updateDoc(doc(db, READS_COLLECTION, readId), {
+  await updateDoc(userReadDoc(ownerEmail, readId), {
     voiceNote,
     noteStatus: "queued",
     // A re-recording invalidates whatever the previous audio produced.
@@ -334,12 +336,12 @@ export async function attachVoiceNote(readId, file, onProgress, previousAudioPat
     await deleteVoiceNoteAudio(previousAudioPath);
   }
 
-  requestNoteAnalysis(readId);
+  requestNoteAnalysis(ownerEmail, readId);
   return voiceNote;
 }
 
-export async function deletePersonalRead(read) {
-  await deleteDoc(doc(db, READS_COLLECTION, read.id));
+export async function deletePersonalRead(ownerEmail, read) {
+  await deleteDoc(userReadDoc(ownerEmail, read.id));
   await deleteVoiceNoteAudio(read.voiceNote?.audioPath);
 }
 

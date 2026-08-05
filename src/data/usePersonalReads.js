@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { db, READS_COLLECTION } from "./firebase";
+import { onSnapshot } from "firebase/firestore";
+import { userReadsCollection } from "./paths";
 
 // Pipeline state of a read's voice note. Reads created before the voice note
 // existed (or saved without one) have no field at all — that's "idle".
@@ -21,10 +21,9 @@ export function isNoteStale(read) {
   return Date.now() - lastTouch > 15 * 60 * 1000;
 }
 
-// Live subscription to the signed-in owner's reads. The query filters on
-// ownerEmail because the Firestore rules only permit owner-scoped listing;
-// sorting is client-side, since a where + orderBy across different fields
-// would require a composite index for a collection this small.
+// Live subscription to a reader's own log. The path scopes it to the owner —
+// no ownerEmail filter is needed any more, and no composite index either.
+// Sorting stays client-side; the collection is small.
 export function usePersonalReads(ownerEmail) {
   const [reads, setReads] = useState([]);
   const [loading, setLoading] = useState(!!ownerEmail);
@@ -39,9 +38,8 @@ export function usePersonalReads(ownerEmail) {
     }
 
     setLoading(true);
-    const q = query(collection(db, READS_COLLECTION), where("ownerEmail", "==", ownerEmail));
     const unsubscribe = onSnapshot(
-      q,
+      userReadsCollection(ownerEmail),
       (snapshot) => {
         const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         // Newest read first; a book still in progress sorts by when it was

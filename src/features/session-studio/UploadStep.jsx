@@ -44,7 +44,7 @@ function isValidAudioFile(file) {
 // finishes the browser is no longer needed: the callable function keeps
 // running server-side and the doc subscription reflects every stage here
 // (or in the history tab) whenever the user comes back.
-export default function UploadStep({ session, onSessionStarted, onReset }) {
+export default function UploadStep({ clubId, session, onSessionStarted, onReset }) {
   const [audioFile, setAudioFile] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -81,7 +81,7 @@ export default function UploadStep({ session, onSessionStarted, onReset }) {
     setErrorMsg('');
     setUploadProgress(0);
     try {
-      const sessionId = await startSessionUpload(audioFile, setUploadProgress);
+      const sessionId = await startSessionUpload(clubId, audioFile, setUploadProgress);
       onSessionStarted(sessionId);
     } catch (err) {
       console.error('Session upload failed:', err);
@@ -94,7 +94,7 @@ export default function UploadStep({ session, onSessionStarted, onReset }) {
   const handleRetry = async () => {
     setRetrying(true);
     try {
-      await retrySession(session);
+      await retrySession(clubId, session);
     } catch (err) {
       console.error('Retry failed:', err);
       setErrorMsg(err.message || 'No se pudo reintentar.');

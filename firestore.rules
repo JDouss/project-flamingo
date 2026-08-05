@@ -2,64 +2,39 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Admins are identified by email on their Firebase Auth token.
-    // Keep this list in sync with VITE_AUTHORIZED_EMAILS.
-    function isAdmin() {
-      return request.auth != null
-        && request.auth.token.email != null
-        && request.auth.token.email.lower() in [
-          'doussinague95@gmail.com'
-        ];
-    }
+    // -----------------------------------------------------------------------
+    // LEGACY collections. Their contents have been copied into the club and
+    // user trees below, and the app no longer reads or writes them. They stay
+    // readable — to Flamingo members only, never to the public — so nothing
+    // that predates the copy becomes unreachable, and they are frozen against
+    // writes so the two copies cannot drift apart. Deleted in the final
+    // cleanup, once the new tree has been lived in.
+    // -----------------------------------------------------------------------
 
-    // Book reviews: public catalog, admin-only writes.
     match /books/{bookId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read: if isClubMember('flamingo');
+      allow write: if false;
     }
 
-    // Club sessions (audio, analysis, grades). Public read so BookDetails
-    // can embed the session player without auth. Clients may only create
-    // the initial placeholder and edit drafts; the Cloud Function writes
-    // with the Admin SDK and bypasses these rules.
     match /transcriptions/{sessionId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if isClubMember('flamingo');
+      allow write: if false;
     }
 
-    // Club member registry (name + persona hints for the AI).
     match /speakers_registry/{memberId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read: if isClubMember('flamingo');
+      allow write: if false;
     }
 
-    // Personal reading log. PRIVATE, unlike every collection above: a doc is
-    // readable and writable only by the email that owns it. No public-read
-    // clause — a logged-out visitor gets nothing, and one owner can never see
-    // another's reads. Listing requires the query to filter on ownerEmail.
+    // Never public, and still nobody's but its owner's.
     match /personal_reads/{readId} {
-      function ownerEmail() {
-        return request.auth != null && request.auth.token.email != null
-          ? request.auth.token.email.lower()
-          : null;
-      }
-
-      allow read, delete: if ownerEmail() != null
-        && ownerEmail() == resource.data.ownerEmail;
-      // An update must leave the doc owned by the same person — otherwise an
-      // owner could hand their read to someone else's library.
-      allow update: if ownerEmail() != null
-        && ownerEmail() == resource.data.ownerEmail
-        && ownerEmail() == request.resource.data.ownerEmail;
-      // Creating a doc owned by someone else is not allowed either.
-      allow create: if ownerEmail() != null
-        && ownerEmail() == request.resource.data.ownerEmail;
+      allow read: if signedInEmail() != null
+        && signedInEmail() == resource.data.ownerEmail;
+      allow write: if false;
     }
 
     // ---------------------------------------------------------------------
-    // New tree: users and clubs. Nothing reads or writes these yet — the
-    // frontend still uses the legacy collections above — but the rules ship
-    // first so the migration has somewhere safe to land.
+    // The live tree: users and clubs. This is what the app reads and writes.
     //
     // There is deliberately NO public-read clause anywhere below: club
     // content is visible only to authenticated members of that club, and a

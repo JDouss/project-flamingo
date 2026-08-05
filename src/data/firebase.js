@@ -45,9 +45,5 @@ export const authorizedEmails = authorizedEmailsEnv
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean);
 
-// Firestore collection ids. Kept as the original names to avoid a data
-// migration; code-level naming uses "sessions" / "members".
-export const SESSIONS_COLLECTION = "transcriptions";
-export const MEMBERS_COLLECTION = "speakers_registry";
-// Private per-owner reading log — never mixed into the public `books` query.
-export const READS_COLLECTION = "personal_reads";
+// Firestore and Storage locations live in ./paths — everything is club- or
+// user-scoped now, so there are no root collection ids left to name here.

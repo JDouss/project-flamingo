@@ -5,14 +5,14 @@
  * (same person split across tags, different people merged), and the club's
  * stats only need the GRADES to be right. So the pipeline centers on that:
  *
- * Stage 1 — transcribeSession({ sessionId }):
+ * Stage 1 — transcribeSession({ clubId, sessionId }):
  *   Audio (Storage, ffmpeg-split into 15-min segments) → plain TIMESTAMPED
  *   transcript (no speaker tags) → a focused pass detects every moment in
  *   the opening/closing stretches where someone states a book grade
  *   (timestamp + verbatim quote + value + suggested member when a name is
  *   audible nearby). Ends in status `needs_grading`.
  *
- * Stage 2 — analyzeSession({ sessionId, grades }):
+ * Stage 2 — analyzeSession({ clubId, sessionId, grades }):
  *   Receives the HUMAN-confirmed grade list (member/round/value — the human
  *   listened to each moment in the UI and assigned it). Those are the stats,
  *   verbatim. Gemini then writes the general summary + session memory from
@@ -54,18 +54,18 @@ const geminiApiKey = defineSecret("GEMINI_API_KEY");
 // output / structured-output surface this pipeline relies on.
 const GEMINI_MODEL = "gemini-3.6-flash";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com";
+// Legacy collections, still read by the migration and by nothing else.
 const SESSIONS_COLLECTION = "transcriptions";
 const MEMBERS_COLLECTION = "speakers_registry";
 const READS_COLLECTION = "personal_reads";
 
-// New tree (see docs/architecture-refactor.md). Nothing in the frontend reads
-// these yet; the migration below is what first populates them.
 const CLUBS_COLLECTION = "clubs";
 const USERS_COLLECTION = "users";
 const FLAMINGO_CLUB_ID = "flamingo";
 const FLAMINGO_CLUB_NAME = "Flamingo Rock";
 
-// Keep in sync with firestore.rules / storage.rules.
+// Only the migration still consults this: everything else asks the club's
+// membership documents who may act. Goes away with the migration itself.
 const ADMIN_EMAILS = ["doussinague95@gmail.com"];
 
 const CALL_OPTS = {
@@ -95,18 +95,34 @@ const MIME_BY_EXT = {
 // Guards
 // ---------------------------------------------------------------------------
 
-function assertAdmin(request) {
+// Who may run the pipeline for a club is now the club's own business: it is
+// the membership document that decides, not a list compiled at deploy time.
+async function assertClubAdmin(db, request) {
   const email = request.auth?.token?.email?.toLowerCase();
-  if (!email || !ADMIN_EMAILS.includes(email)) {
+  if (!email) {
+    throw new HttpsError("unauthenticated", "Necesitas iniciar sesión.");
+  }
+  const clubId = request.data?.clubId;
+  if (!clubId || typeof clubId !== "string") {
+    throw new HttpsError("invalid-argument", "Falta clubId.");
+  }
+  const member = await db
+    .collection(CLUBS_COLLECTION)
+    .doc(clubId)
+    .collection("members")
+    .doc(email)
+    .get();
+  if (!member.exists || member.data().role !== "admin") {
     throw new HttpsError("permission-denied", "Solo los administradores del club pueden procesar sesiones.");
   }
+  return clubId;
 }
 
-async function loadSession(db, sessionId) {
+async function loadSession(db, clubId, sessionId) {
   if (!sessionId || typeof sessionId !== "string") {
     throw new HttpsError("invalid-argument", "Falta sessionId.");
   }
-  const ref = db.collection(SESSIONS_COLLECTION).doc(sessionId);
+  const ref = db.collection(CLUBS_COLLECTION).doc(clubId).collection("sessions").doc(sessionId);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", `No existe la sesión ${sessionId}.`);
@@ -478,9 +494,9 @@ async function detectGradeEvents(canonical, members, apiKey) {
 }
 
 export const transcribeSession = onCall(CALL_OPTS, async (request) => {
-  assertAdmin(request);
   const db = getFirestore();
-  const { ref, data } = await loadSession(db, request.data?.sessionId);
+  const clubId = await assertClubAdmin(db, request);
+  const { ref, data } = await loadSession(db, clubId, request.data?.sessionId);
 
   if (data.status === "transcribing" || data.status === "analyzing") {
     // A stale lock (e.g. a previous run that died) is released after 90 min.
@@ -535,8 +551,13 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
 
     const canonical = entries.map((e) => `[${fmtTime(e.t)}] ${e.text}`).join("\n");
 
-    const membersSnap = await db.collection(MEMBERS_COLLECTION).get();
-    const members = membersSnap.docs.map((d) => d.data());
+    // The roster lives on the club document: a handful of humans, read as a
+    // unit. `personaHint` is what the grade detector uses to spot names.
+    const clubSnap = await db.collection(CLUBS_COLLECTION).doc(clubId).get();
+    const members = (clubSnap.data()?.roster || []).map((entry) => ({
+      name: entry.name,
+      persona: entry.personaHint || "",
+    }));
 
     await touchLock("localizando notas");
     logger.info(`Session ${ref.id}: detecting grade moments`);
@@ -546,7 +567,7 @@ export const transcribeSession = onCall(CALL_OPTS, async (request) => {
         gradeEvents.map((e) => `${e.round}@${e.t !== null ? fmtTime(e.t) : "?"}=${e.value ?? "?"}`).join(", ")
     );
 
-    const transcriptPath = `transcripts/${ref.id}.txt`;
+    const transcriptPath = `clubs/${clubId}/transcripts/${ref.id}.txt`;
     await bucket.file(transcriptPath).save(canonical, {
       contentType: "text/plain; charset=utf-8",
     });
@@ -667,9 +688,9 @@ function buildGradesFromConfirmed(list) {
 }
 
 export const analyzeSession = onCall(CALL_OPTS, async (request) => {
-  assertAdmin(request);
   const db = getFirestore();
-  const { ref, data } = await loadSession(db, request.data?.sessionId);
+  const clubId = await assertClubAdmin(db, request);
+  const { ref, data } = await loadSession(db, clubId, request.data?.sessionId);
   const confirmedGrades = request.data?.grades;
 
   if (!data.transcriptPath) {
@@ -816,18 +837,15 @@ export const analyzeReadingNote = onCall(NOTE_CALL_OPTS, async (request) => {
   }
 
   const db = getFirestore();
-  const ref = db.collection(READS_COLLECTION).doc(readId);
+  // The read lives under its owner, so addressing it by the caller's email is
+  // the ownership check: there is no path to someone else's log from here.
+  const ref = db.collection(USERS_COLLECTION).doc(email).collection("reads").doc(readId);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", `No existe la lectura ${readId}.`);
   }
 
   const data = snap.data();
-  // Ownership, not just "is an admin": this collection is private per owner,
-  // and the Admin SDK bypasses the Firestore rules that would say so.
-  if (data.ownerEmail !== email) {
-    throw new HttpsError("permission-denied", "Esta lectura no es tuya.");
-  }
 
   const audioPath = data.voiceNote?.audioPath;
   if (!audioPath) {

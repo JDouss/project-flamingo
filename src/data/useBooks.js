@@ -1,15 +1,22 @@
 import { useState, useEffect } from "react";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
-import { db } from "./firebase";
+import { onSnapshot, query, orderBy } from "firebase/firestore";
+import { clubBooksCollection } from "./paths";
 
-// Live subscription to the full book catalog (small collection, realtime
-// updates are effectively free at club scale).
-export function useBooks() {
+// Live subscription to one club's catalog (small collection, realtime updates
+// are effectively free at club scale).
+export function useBooks(clubId) {
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (!clubId) {
+      setBooks([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
     // Safety net: if the snapshot never arrives (hung transport, offline),
     // stop showing the infinite spinner. The listener stays attached and
     // will still populate books whenever the connection recovers.
@@ -18,7 +25,7 @@ export function useBooks() {
       setLoading(false);
     }, 6000);
 
-    const q = query(collection(db, "books"), orderBy("createdAt", "desc"));
+    const q = query(clubBooksCollection(clubId), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
@@ -37,7 +44,7 @@ export function useBooks() {
       clearTimeout(safetyTimeout);
       unsubscribe();
     };
-  }, []);
+  }, [clubId]);
 
   return { books, loading, error };
 }

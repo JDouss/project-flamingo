@@ -29,8 +29,10 @@ bolted together.
 
 ## Data model
 
-New Firestore collection **`personal_reads`** — separate from `books` so the
-public catalog query can never pick it up by accident.
+Lives at **`users/{email}/reads/{readId}`** — under the reader, so the path
+itself is the ownership. (It began as a root `personal_reads` collection; the
+documents were copied across unchanged, and the old collection is frozen
+read-only until the cleanup phase removes it.)
 
 | Field | Type | Notes |
 |---|---|---|
@@ -82,19 +84,19 @@ for a book you just want to grade and move on from.
 This is the part that must not be got wrong, so it is enforced in three
 independent places:
 
-1. **Firestore rules** — `personal_reads` docs are readable and writable only
-   when `request.auth.token.email` matches the doc's `ownerEmail`. There is no
-   public-read clause, unlike `books`.
-2. **Storage rules** — voice notes live under `voice-notes/`, which is
-   admin-only for **both read and write**. Note the contrast with
-   `recordings/` (club sessions), which is deliberately world-readable so
-   `BookDetails` can embed the player. Personal audio never is.
+1. **Firestore rules** — a read is readable and writable only by the email in
+   its own path, and an update may not rewrite `ownerEmail`. There is no
+   public-read clause anywhere in the tree.
+2. **Storage rules** — voice notes live under `users/{email}/voice-notes/`,
+   readable and writable only by that email. Club recordings sit under
+   `clubs/{clubId}/recordings/` behind the membership claim; neither is public
+   any more.
 3. **Client** — the whole feature is mounted behind the existing auth gate, so
    a logged-out visitor never even renders the entry point.
 
-Queries are `where("ownerEmail", "==", myEmail)` and sort client-side. Sorting
-server-side would need a composite index; the collection is small enough that
-this is not worth a deploy dependency.
+The subscription reads the collection directly — the path already scopes it to
+one reader, so there is no filter and no composite index to maintain. Sorting
+stays client-side; the collection is small.
 
 ## Voice-note pipeline
 
@@ -102,7 +104,8 @@ One callable, `analyzeReadingNote({ readId })`, in `functions/index.js`,
 reusing the existing Gemini helpers (`uploadToGeminiFiles`,
 `generateJsonWithRetry`, the temperature-varying retry logic).
 
-1. Verify the caller owns the doc, mark it `transcribing`.
+1. Address the read under the caller's own email — the path *is* the ownership
+   check — and mark it `transcribing`.
 2. Download the audio from Storage.
 3. **Transcode to 16 kHz mono WAV with ffmpeg** (already a dependency via
    `ffmpeg-static`). This is what makes in-browser recording work at all:

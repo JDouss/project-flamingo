@@ -13,13 +13,13 @@ const STATUS_META = {
   error: { label: 'Error', color: 'var(--accent-coral)' },
 };
 
-export default function SessionHistory({ books, onOpenSession }) {
-  const { sessions, loading, refresh } = useSessionList(true);
+export default function SessionHistory({ clubId, books, onOpenSession }) {
+  const { sessions, loading, refresh } = useSessionList(clubId, true);
 
   const handleDelete = async (session) => {
     if (!window.confirm('¿Estás seguro de que deseas eliminar esta sesión del historial?')) return;
     try {
-      await deleteSession(session.id);
+      await deleteSession(clubId, session.id);
       refresh();
     } catch (err) {
       console.error('Failed to delete session:', err);

@@ -103,6 +103,7 @@ export default function LibraryPage() {
       {detailRead && (
         <PersonalReadDetails
           read={detailRead}
+          ownerEmail={ownerEmail}
           onClose={() => setDetailReadId(null)}
           onEdit={startEdit}
         />

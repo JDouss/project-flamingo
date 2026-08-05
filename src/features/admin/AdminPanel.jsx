@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import { X, Plus, Trash2, UploadCloud, BookOpen, Save, Link, Quote, Star, Sparkles, Maximize2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { renderMarkdown } from '../../utils/markdown';
-import { useMembers } from '../../data/useMembers';
+import { useRoster } from '../../data/useClub';
 import { useSessionList } from '../../data/useSessions';
 import { saveBook, deleteBook, uploadCover, linkSessionToBook } from '../../data/mutations';
 
-export default function AdminPanel({ isOpen, onClose, editBook, books }) {
+export default function AdminPanel({ isOpen, onClose, clubId, editBook, books }) {
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [genre, setGenre] = useState('');
@@ -51,12 +51,12 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
 
   // Member grades states
   const [grades, setGrades] = useState({ start: {}, end: {} });
-  const { members } = useMembers();
+  const { roster } = useRoster(clubId);
   const {
     sessions: sessionDrafts,
     loading: loadingDrafts,
     refresh: fetchSessionDrafts,
-  } = useSessionList(isOpen);
+  } = useSessionList(clubId, isOpen);
 
   const handleImportSessionDraft = () => {
     if (!selectedDraftId) return;
@@ -179,14 +179,14 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
       setReferences([{ title: '', url: '' }]);
       
       const initialGrades = { start: {}, end: {} };
-      members.forEach(m => {
+      roster.forEach(m => {
         initialGrades.start[m.name] = '';
         initialGrades.end[m.name] = '';
       });
       setGrades(initialGrades);
     }
     setError('');
-  }, [editBook, isOpen, members]);
+  }, [editBook, isOpen, roster]);
 
   if (!isOpen) return null;
 
@@ -321,12 +321,12 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
       if (!editBook) {
         bookData.createdAt = new Date().toISOString();
       }
-      const savedBookId = await saveBook(editBook ? editBook.id : null, bookData);
+      const savedBookId = await saveBook(clubId, editBook ? editBook.id : null, bookData);
 
       // Bidirectional reference update
       if (transcriptionId && savedBookId) {
         try {
-          await linkSessionToBook(transcriptionId, savedBookId);
+          await linkSessionToBook(clubId, transcriptionId, savedBookId);
         } catch (e) {
           console.warn('Failed to link session to book:', e);
         }
@@ -357,7 +357,7 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
       setSaving(true);
       setError('');
       try {
-        await deleteBook(editBook.id);
+        await deleteBook(clubId, editBook.id);
         onClose();
       } catch (err) {
         console.error(err);
@@ -601,8 +601,8 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
                   placeholder="Ej. Almu, Alejandro, Zepe..."
                 />
                 <datalist id="suggested-by-options">
-                  {members.map((m) => (
-                    <option key={m.id || m.name} value={m.name} />
+                  {roster.map((m) => (
+                    <option key={m.name} value={m.name} />
                   ))}
                 </datalist>
               </div>
@@ -848,10 +848,10 @@ export default function AdminPanel({ isOpen, onClose, editBook, books }) {
                   <span>Nota Inicial</span>
                   <span>Nota Final</span>
                 </div>
-                {members.map(member => {
+                {roster.map(member => {
                   const mName = member.name;
                   return (
-                    <div key={member.id || mName} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: '1rem', alignItems: 'center' }}>
+                    <div key={mName} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: '1rem', alignItems: 'center' }}>
                       <span style={{ fontSize: '0.9rem', fontWeight: '500' }}>{mName}</span>
                       <input
                         type="number"
