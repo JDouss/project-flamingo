@@ -10,6 +10,7 @@ import { useClubDoc, useClubMembership, useMyClubLibraries } from '../data/useCl
 import { myLibrary } from '../features/personal/readAdapter';
 import Loading from '../ui/Loading';
 import LandingPage from '../features/landing/LandingPage';
+import JoinPage from '../features/landing/JoinPage';
 import ClubShelfPage from '../features/club/ClubShelfPage';
 import ClubStatsPage from '../features/club/ClubStatsPage';
 import LibraryPage from '../features/library/LibraryPage';
@@ -89,6 +90,7 @@ export default function AppRoutes() {
         <Routes>
           <Route element={<AppLayout />}>
             <Route index element={<LandingPage />} />
+            <Route path="join/:inviteCode" element={<JoinPage />} />
 
             <Route path="club/:clubId" element={<ClubLayout />}>
               <Route index element={<ClubShelfPage />} />

@@ -144,3 +144,40 @@ export function useMyClubLibraries(clubIds, email) {
 
   return { libraries, loading };
 }
+
+// The clubs I belong to, by name — just enough for a switcher. The ids come
+// from the token claim; the names have to be read, since a claim carries only
+// roles and there is no listing a reader is allowed to do.
+export function useMyClubs(clubIds) {
+  const [clubs, setClubs] = useState([]);
+  const key = clubIds.join(",");
+
+  useEffect(() => {
+    const ids = key ? key.split(",") : [];
+    if (ids.length === 0) {
+      setClubs([]);
+      return;
+    }
+
+    const names = new Map(ids.map((id) => [id, { id, name: id }]));
+    const emit = () => setClubs(ids.map((id) => names.get(id)));
+
+    const unsubscribes = ids.map((clubId) =>
+      onSnapshot(
+        clubDoc(clubId),
+        (snap) => {
+          // Fall back to the id: a club whose document has not arrived yet
+          // should still be switchable to, not missing from the menu.
+          if (snap.exists()) names.set(clubId, { id: clubId, name: snap.data().name || clubId });
+          emit();
+        },
+        (err) => console.error(`Failed to load club ${clubId}:`, err)
+      )
+    );
+    emit();
+
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [key]);
+
+  return clubs;
+}
