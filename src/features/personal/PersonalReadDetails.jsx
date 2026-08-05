@@ -59,7 +59,7 @@ function InsightList({ icon, title, items }) {
 // Detail view for one personal read. Deliberately its own modal rather than a
 // branch inside BookDetails: a club book is about grades, quotes and the
 // session memory, while this is about one person's voice note.
-export default function PersonalReadDetails({ read, onClose, onEdit }) {
+export default function PersonalReadDetails({ read, ownerEmail, onClose, onEdit }) {
   // Keyed by the path it was resolved for, so a URL from a previously opened
   // read is never rendered against the current one while the new one loads.
   const [audio, setAudio] = useState({ path: null, url: '' });
@@ -97,7 +97,7 @@ export default function PersonalReadDetails({ read, onClose, onEdit }) {
     }
     setDeleting(true);
     try {
-      await deletePersonalRead(read);
+      await deletePersonalRead(ownerEmail, read);
       onClose();
     } catch (err) {
       console.error('Delete failed:', err);
@@ -270,7 +270,7 @@ export default function PersonalReadDetails({ read, onClose, onEdit }) {
                 type="button"
                 className="btn btn-secondary"
                 style={{ padding: '0.35rem 0.7rem', fontSize: '0.78rem' }}
-                onClick={() => requestNoteAnalysis(read.id)}
+                onClick={() => requestNoteAnalysis(ownerEmail, read.id)}
               >
                 <RefreshCw size={13} /> Reintentar
               </button>

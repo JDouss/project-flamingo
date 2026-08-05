@@ -1,15 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  onSnapshot,
-  query,
-  orderBy,
-} from "firebase/firestore";
+import { getDoc, getDocs, onSnapshot, query, orderBy } from "firebase/firestore";
 import { ref, getDownloadURL } from "firebase/storage";
-import { db, storage, SESSIONS_COLLECTION } from "./firebase";
+import { storage } from "./firebase";
+import { clubSessionDoc, clubSessionsCollection } from "./paths";
 
 // Legacy docs (pre-pipeline) have no status field: they were saved fully
 // analyzed, so they behave as published. "processing" (storage-trigger era)
@@ -42,19 +35,19 @@ export function isSessionStale(session) {
 
 // Live subscription to a single session doc — this is how the UI follows
 // the Cloud Function pipeline (uploading → processing → draft → published).
-export function useSession(sessionId) {
+export function useSession(clubId, sessionId) {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(!!sessionId);
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!clubId || !sessionId) {
       setSession(null);
       setLoading(false);
       return;
     }
     setLoading(true);
     const unsubscribe = onSnapshot(
-      doc(db, SESSIONS_COLLECTION, sessionId),
+      clubSessionDoc(clubId, sessionId),
       (snap) => {
         setSession(snap.exists() ? { id: snap.id, ...snap.data() } : null);
         setLoading(false);
@@ -65,21 +58,22 @@ export function useSession(sessionId) {
       }
     );
     return () => unsubscribe();
-  }, [sessionId]);
+  }, [clubId, sessionId]);
 
   return { session, loading };
 }
 
 // One-shot session list for the history tab (docs are light: transcripts
 // live in Storage, only an excerpt is inlined).
-export function useSessionList(enabled) {
+export function useSessionList(clubId, enabled) {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
+    if (!clubId) return;
     setLoading(true);
     try {
-      const q = query(collection(db, SESSIONS_COLLECTION), orderBy("createdAt", "desc"));
+      const q = query(clubSessionsCollection(clubId), orderBy("createdAt", "desc"));
       const snapshot = await getDocs(q);
       setSessions(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
     } catch (err) {
@@ -87,7 +81,7 @@ export function useSessionList(enabled) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [clubId]);
 
   useEffect(() => {
     if (enabled) refresh();
@@ -96,8 +90,8 @@ export function useSessionList(enabled) {
   return { sessions, loading, refresh };
 }
 
-export async function fetchSessionById(sessionId) {
-  const snap = await getDoc(doc(db, SESSIONS_COLLECTION, sessionId));
+export async function fetchSessionById(clubId, sessionId) {
+  const snap = await getDoc(clubSessionDoc(clubId, sessionId));
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
 

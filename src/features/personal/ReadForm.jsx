@@ -120,11 +120,11 @@ export default function ReadForm({ ownerEmail, editRead, onSaved, onCancel }) {
         payload.voiceNote = null;
       }
 
-      const readId = await savePersonalRead(editRead ? editRead.id : null, payload);
+      const readId = await savePersonalRead(ownerEmail, editRead ? editRead.id : null, payload);
 
       if (noteFile) {
         setUploadProgress(0);
-        await attachVoiceNote(readId, noteFile, setUploadProgress, editRead?.voiceNote?.audioPath);
+        await attachVoiceNote(ownerEmail, readId, noteFile, setUploadProgress, editRead?.voiceNote?.audioPath);
       }
 
       onSaved(readId);

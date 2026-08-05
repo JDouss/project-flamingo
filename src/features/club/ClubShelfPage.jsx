@@ -17,16 +17,12 @@ import { readToCard, bookToCard, PERSONAL_SOURCE } from '../personal/readAdapter
 // on it. Session Studio stays a modal opened from here — it acts on this
 // club's sessions, so it belongs to this page rather than the global header.
 export default function ClubShelfPage() {
-  const { books, loading } = useOutletContext();
-  const { ownerEmail, isAdmin } = useAuth();
+  const { clubId, books, loading, isClubAdmin } = useOutletContext();
+  const { ownerEmail } = useAuth();
   const navigate = useNavigate();
-  // Any Google account can sign in now, but the personal reading log still
-  // lives in the legacy `personal_reads` collection, which belongs to the
-  // allowlisted owner. Until reads move under `users/{email}`, nobody else
-  // gets a library here — a newcomer must not start writing into a collection
-  // the migration has already copied.
-  const libraryEmail = isAdmin ? ownerEmail : null;
-  const { reads } = usePersonalReads(libraryEmail);
+  // Every signed-in reader has their own log now, under their own email, so
+  // the shelf can offer to merge it in for anyone.
+  const { reads } = usePersonalReads(ownerEmail);
 
   // Modal states
   const [isAdminOpen, setIsAdminOpen] = useState(false);
@@ -53,9 +49,9 @@ export default function ClubShelfPage() {
   // across both without special cases below.
   const shelf = useMemo(() => {
     const clubCards = books.map(bookToCard);
-    if (!includePersonal || !libraryEmail) return clubCards;
+    if (!includePersonal || !ownerEmail) return clubCards;
     return [...clubCards, ...reads.map(readToCard)];
-  }, [books, reads, includePersonal, libraryEmail]);
+  }, [books, reads, includePersonal, ownerEmail]);
 
   const selectedRead = useMemo(
     () => reads.find((r) => r.id === selectedReadId) || null,
@@ -137,7 +133,7 @@ export default function ClubShelfPage() {
   return (
     <main className="container" style={{ paddingTop: '2.5rem' }}>
       {/* Club admin actions live with the club's data, not in the app header. */}
-      {isAdmin && (
+      {isClubAdmin && (
         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
           <button className="btn btn-secondary" onClick={() => setIsStudioOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <Volume2 size={15} /> Sesión de Club
@@ -190,7 +186,7 @@ export default function ClubShelfPage() {
               <option value="reading">Leyendo</option>
               <option value="to-read">Por leer</option>
               {/* Only reachable when your own reads are on the shelf. */}
-              {includePersonal && libraryEmail && <option value="abandoned">Abandonado</option>}
+              {includePersonal && ownerEmail && <option value="abandoned">Abandonado</option>}
             </select>
           </div>
 
@@ -211,7 +207,7 @@ export default function ClubShelfPage() {
 
           {/* Merge your own reads into the club shelf. Signed-in only, and
               off by default so the catalog opens as the club's. */}
-          {libraryEmail && (
+          {ownerEmail && (
             <label className={`shelf-toggle ${includePersonal ? 'active' : ''}`}>
               <input
                 type="checkbox"
@@ -239,7 +235,7 @@ export default function ClubShelfPage() {
               book={book}
               onClick={() => openCard(book)}
               onEdit={editCard}
-              isAdmin={isAdmin}
+              isAdmin={isClubAdmin}
             />
           ))}
         </div>
@@ -264,6 +260,7 @@ export default function ClubShelfPage() {
         <AdminPanel
           isOpen={isAdminOpen}
           onClose={() => setIsAdminOpen(false)}
+          clubId={clubId}
           editBook={editingBook}
           books={books}
         />
@@ -272,12 +269,13 @@ export default function ClubShelfPage() {
       {selectedBook && (
         <BookDetails
           book={selectedBook}
+          clubId={clubId}
           onClose={() => setSelectedBookId(null)}
           onEdit={(book) => {
             setSelectedBookId(null);
             startEdit(book);
           }}
-          isAdmin={isAdmin}
+          isAdmin={isClubAdmin}
         />
       )}
 
@@ -285,6 +283,7 @@ export default function ClubShelfPage() {
         <SessionStudio
           isOpen={isStudioOpen}
           onClose={() => setIsStudioOpen(false)}
+          clubId={clubId}
           books={books}
         />
       )}
@@ -292,6 +291,7 @@ export default function ClubShelfPage() {
       {selectedRead && (
         <PersonalReadDetails
           read={selectedRead}
+          ownerEmail={ownerEmail}
           onClose={() => setSelectedReadId(null)}
           onEdit={editRead}
         />

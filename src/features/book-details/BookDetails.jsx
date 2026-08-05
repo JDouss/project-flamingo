@@ -3,7 +3,7 @@ import { X, Star, ChevronLeft, ChevronRight, Quote, Link, Edit2, Volume2 } from 
 import { renderMarkdown } from '../../utils/markdown';
 import { fetchSessionById, fetchTranscript } from '../../data/useSessions';
 
-export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
+export default function BookDetails({ book, onClose, onEdit, isAdmin, clubId }) {
   const [activeQuoteIdx, setActiveQuoteIdx] = useState(0);
   const [sessionData, setSessionData] = useState(null);
   const [loadingSession, setLoadingSession] = useState(false);
@@ -17,7 +17,7 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin }) {
 
     let cancelled = false;
     setLoadingSession(true);
-    fetchSessionById(book.transcriptionId)
+    fetchSessionById(clubId, book.transcriptionId)
       .then((session) => {
         if (!cancelled) setSessionData(session);
       })

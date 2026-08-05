@@ -7,9 +7,11 @@ import { createContext, useContext } from "react";
 export const AuthContext = createContext({
   user: null,
   ownerEmail: null,
-  // Signed in is not the same as allowed to act: `user` answers "who is
-  // this?", `isAdmin` answers "may they edit the club?".
-  isAdmin: false,
+  // Which clubs this account belongs to, as { clubId: 'admin' | 'member' },
+  // read from the ID token's custom claim. The membership documents are the
+  // authority; this is their mirror, and it is what lets the app know which
+  // clubs to offer without listing a collection it has no permission to read.
+  clubs: {},
   ready: false,
   logout: () => {},
 });

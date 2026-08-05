@@ -2,59 +2,50 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    function isAdmin() {
-      return request.auth != null
-        && request.auth.token.email != null
-        && request.auth.token.email.lower() in [
-          'doussinague95@gmail.com'
-        ];
-    }
+    // -----------------------------------------------------------------------
+    // LEGACY paths. The files were deliberately NOT moved — the documents
+    // copied into the new tree still point here — so these stay readable to
+    // the people entitled to them, and frozen against new writes. Club media
+    // is gated by the membership claim; the one existing reading log by its
+    // owner's email.
+    //
+    // Locking `recordings/` is the point of the change: a stored public URL
+    // no longer resolves for a stranger, while a member still gets the file
+    // through getDownloadURL, which carries their token.
+    // -----------------------------------------------------------------------
 
-    // Session recordings: uploaded by admins, played back publicly.
-    // 100 MB cap keeps runaway uploads (and function memory) in check.
     match /recordings/{allPaths=**} {
-      allow read: if true;
-      allow write: if isAdmin()
-        && request.resource.size < 100 * 1024 * 1024
-        && request.resource.contentType.matches('audio/.*');
-    }
-
-    // Diarized transcripts: written only by the Cloud Function (Admin SDK
-    // bypasses rules), read publicly on demand from BookDetails.
-    match /transcripts/{allPaths=**} {
-      allow read: if true;
+      allow read: if inClub('flamingo');
       allow write: if false;
     }
 
-    // Book cover images.
+    match /transcripts/{allPaths=**} {
+      allow read: if inClub('flamingo');
+      allow write: if false;
+    }
+
+    match /voice-notes/{allPaths=**} {
+      allow read: if isOwner('doussinague95@gmail.com');
+      allow write: if false;
+    }
+
+    // Voiceprints: the diarization experiment, long since removed.
+    match /voiceprints/{allPaths=**} {
+      allow read: if inClub('flamingo');
+      allow write: if false;
+    }
+
+    // Book covers stay public-read: a jacket is not personal data, and
+    // per-card signed URLs flicker on a grid. Writing needs a club.
     match /covers/{allPaths=**} {
       allow read: if true;
-      allow write: if isAdmin()
+      allow write: if request.auth != null
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
-    // Personal reading-log voice notes. Unlike /recordings above, these are
-    // NOT world-readable: personal audio is private to the admin who recorded
-    // it. 25 MB cap — longer audio belongs in the club Session Studio, which
-    // has the segmenting pipeline for it.
-    match /voice-notes/{allPaths=**} {
-      allow read: if isAdmin();
-      allow write: if isAdmin()
-        && request.resource.size < 25 * 1024 * 1024
-        && request.resource.contentType.matches('audio/.*');
-    }
-
-    // Legacy voiceprints (feature removed): keep readable, block new writes.
-    match /voiceprints/{allPaths=**} {
-      allow read: if true;
-      allow write: if false;
-    }
-
     // -----------------------------------------------------------------------
-    // New tree: club-scoped media and per-user voice notes. Nothing writes
-    // here yet — the frontend still uses the legacy paths above — but the
-    // rules ship with the data model so the flip has somewhere to land.
+    // The live paths: club-scoped media and per-user voice notes.
     //
     // Storage rules cannot read Firestore, so club membership arrives as a
     // custom claim: { clubs: { flamingo: 'admin', otro: 'member' } }, kept in

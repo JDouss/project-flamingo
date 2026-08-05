@@ -6,7 +6,7 @@ import { publishSessionAsNewBook, publishSessionToBook, updateSessionDraft, reop
 // Human-in-the-loop review of a pipeline draft: the admin corrects what the
 // AI produced (metadata, grades, session memory) and blesses it into a book
 // review — either a new one or an existing one.
-export default function ReviewStep({ session, books, onPublished, onDiscard }) {
+export default function ReviewStep({ clubId, session, books, onPublished, onDiscard }) {
   const initial = session.analysis || {};
   const [bookTitle, setBookTitle] = useState(initial.bookTitle || '');
   const [bookAuthor, setBookAuthor] = useState(initial.bookAuthor || '');
@@ -52,13 +52,13 @@ export default function ReviewStep({ session, books, onPublished, onDiscard }) {
     try {
       const analysis = editedAnalysis();
       // Persist the reviewed analysis on the session first, then publish.
-      await updateSessionDraft(session.id, analysis);
+      await updateSessionDraft(clubId, session.id, analysis);
       if (mode === 'new') {
-        await publishSessionAsNewBook(session, analysis);
+        await publishSessionAsNewBook(clubId, session, analysis);
       } else {
         const book = books.find((b) => b.id === targetBookId);
         if (!book) throw new Error('Selecciona una reseña de destino.');
-        await publishSessionToBook(session, analysis, book);
+        await publishSessionToBook(clubId, session, analysis, book);
       }
       onPublished();
     } catch (err) {
@@ -274,7 +274,7 @@ export default function ReviewStep({ session, books, onPublished, onDiscard }) {
               type="button"
               onClick={async () => {
                 if (!window.confirm('¿Volver al paso de asignación de notas? El análisis se regenerará con las notas corregidas.')) return;
-                await reopenGrading(session.id);
+                await reopenGrading(clubId, session.id);
               }}
               disabled={publishing}
               style={{ background: 'none', border: 'none', color: 'var(--primary-ink)', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}

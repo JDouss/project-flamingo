@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Sparkles, Volume2, AlertTriangle, FileAudio, Play, RotateCcw, Plus, X, Info } from 'lucide-react';
-import { useMembers } from '../../data/useMembers';
+import { useRoster } from '../../data/useClub';
 import { requestAnalysis, requestTranscription } from '../../data/mutations';
 import { fetchTranscript } from '../../data/useSessions';
 
@@ -22,8 +22,8 @@ const ROUND_META = {
 // LOCATES the moments where marks are spoken (timestamp + quote + detected
 // value); the human listens to each one (▶ seeks the audio) and says who
 // said it. No diarization involved: identification is per-moment, by ear.
-export default function GradingStep({ session }) {
-  const { members } = useMembers();
+export default function GradingStep({ clubId, session }) {
+  const { roster } = useRoster(clubId);
   const [rows, setRows] = useState([]);
   const [transcript, setTranscript] = useState('');
   const [loadingTranscript, setLoadingTranscript] = useState(false);
@@ -95,6 +95,7 @@ export default function GradingStep({ session }) {
   const handleConfirm = () => {
     setSubmitting(true);
     requestAnalysis(
+      clubId,
       session.id,
       rows.map((r) => ({
         member: r.member,
@@ -109,7 +110,7 @@ export default function GradingStep({ session }) {
 
   const handleRetranscribe = () => {
     if (!window.confirm('¿Volver a transcribir el audio desde cero? Se descartarán los momentos de nota detectados.')) return;
-    requestTranscription(session.id);
+    requestTranscription(clubId, session.id);
   };
 
   // Legacy session from the diarization era: no grade moments to work with.
@@ -200,8 +201,8 @@ export default function GradingStep({ session }) {
                     style={{ flex: '1 1 150px', fontSize: '0.85rem' }}
                   >
                     <option value="">-- ¿Quién lo dice? --</option>
-                    {members.map((m) => (
-                      <option key={m.id} value={m.name}>{m.name}</option>
+                    {roster.map((m) => (
+                      <option key={m.name} value={m.name}>{m.name}</option>
                     ))}
                     <option value="Invitado">Invitado (no puntúa)</option>
                   </select>

@@ -2,52 +2,68 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react
 import AuthProvider from './AuthProvider';
 import AppLayout from './AppLayout';
 import { useAuth } from './authContext';
-import { DEFAULT_CLUB_ID, isKnownClub } from './clubs';
+import { DEFAULT_CLUB_ID } from './clubs';
 import { useBooks } from '../data/useBooks';
 import { usePersonalReads } from '../data/usePersonalReads';
+import { useClubDoc, useClubMembership } from '../data/useClub';
 import Loading from '../ui/Loading';
+import LandingPage from '../features/landing/LandingPage';
 import ClubShelfPage from '../features/club/ClubShelfPage';
 import ClubStatsPage from '../features/club/ClubStatsPage';
 import LibraryPage from '../features/library/LibraryPage';
 import LibraryStatsPage from '../features/library/LibraryStatsPage';
 import MigrationPage from '../features/admin/MigrationPage';
 
-// Club context. The club pages hang off this layout, so the catalog is
-// subscribed once and shared by the shelf and the dashboard instead of once
-// per page. P1 still reads the root `books` collection; only the URL is
-// club-scoped so far.
+// Club context and the membership gate in one place. The club pages hang off
+// this layout, so the catalog is subscribed once and shared by the shelf and
+// the dashboard. A non-member never gets past here — and the rules would
+// refuse them anyway, so this is the courteous version of a denial, not the
+// enforcement.
 function ClubLayout() {
   const { clubId } = useParams();
-  const { books, loading, error } = useBooks();
+  const { ownerEmail, ready } = useAuth();
+  const { role, isMember, isClubAdmin, loading: membershipLoading } = useClubMembership(
+    clubId,
+    ownerEmail
+  );
+  const { club, loading: clubLoading } = useClubDoc(isMember ? clubId : null);
+  const { books, loading: booksLoading, error } = useBooks(isMember ? clubId : null);
 
-  if (!isKnownClub(clubId)) return <Navigate to={`/club/${DEFAULT_CLUB_ID}`} replace />;
+  if (!ready || membershipLoading) return <Loading label="Comprobando tu acceso…" />;
+  if (!isMember) return <Navigate to="/" replace />;
 
-  return <Outlet context={{ clubId, books, loading, error }} />;
+  return (
+    <Outlet
+      context={{
+        clubId,
+        club,
+        role,
+        isClubAdmin,
+        books,
+        loading: booksLoading || clubLoading,
+        error,
+      }}
+    />
+  );
 }
 
-// Library context, and the auth gate for it in one place: a personal read is
-// only ever fetched for its owner, so a visitor's session never issues the
-// query at all.
+// A reader's own library. Every signed-in account has one now: the reads live
+// under their own email, so there is nothing to share and nothing to leak.
 function LibraryLayout() {
-  const { ownerEmail, isAdmin, ready } = useAuth();
-  // Sign-in is open to any Google account now, but the reading log is still
-  // the legacy `personal_reads` collection — the allowlisted owner's. It opens
-  // up when reads move under `users/{email}/reads`.
-  const libraryEmail = isAdmin ? ownerEmail : null;
-  const { reads, loading, error } = usePersonalReads(libraryEmail);
+  const { ownerEmail, ready } = useAuth();
+  const { reads, loading, error } = usePersonalReads(ownerEmail);
 
   if (!ready) return <Loading label="Abriendo tu biblioteca…" />;
-  if (!libraryEmail) return <Navigate to={`/club/${DEFAULT_CLUB_ID}`} replace />;
+  if (!ownerEmail) return <Navigate to="/" replace />;
 
-  return <Outlet context={{ ownerEmail: libraryEmail, reads, loading, error }} />;
+  return <Outlet context={{ ownerEmail, reads, loading, error }} />;
 }
 
-// Owner-only, deliberately unlinked: the one-off migration into the new tree
-// and the counts that verify it. Goes away with the callable it drives.
-function RequireOwner({ children }) {
-  const { isAdmin, ready } = useAuth();
+// Temporary: the migration page is for whoever administers the first club.
+function RequireClubAdmin({ children }) {
+  const { clubs, ready } = useAuth();
   if (!ready) return <Loading label="Comprobando permisos…" />;
-  if (!isAdmin) return <Navigate to={`/club/${DEFAULT_CLUB_ID}`} replace />;
+  if (clubs[DEFAULT_CLUB_ID] !== 'admin') return <Navigate to="/" replace />;
   return children;
 }
 
@@ -57,7 +73,7 @@ export default function AppRoutes() {
       <AuthProvider>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route index element={<Navigate to={`/club/${DEFAULT_CLUB_ID}`} replace />} />
+            <Route index element={<LandingPage />} />
 
             <Route path="club/:clubId" element={<ClubLayout />}>
               <Route index element={<ClubShelfPage />} />
@@ -71,10 +87,10 @@ export default function AppRoutes() {
 
             <Route
               path="migracion"
-              element={<RequireOwner><MigrationPage /></RequireOwner>}
+              element={<RequireClubAdmin><MigrationPage /></RequireClubAdmin>}
             />
 
-            {/* Anything unknown goes back to the club shelf. */}
+            {/* Anything unknown goes back to the front door. */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

@@ -10,10 +10,10 @@ import { useSession, sessionStatus } from '../../data/useSessions';
 // Session Studio: the club-session pipeline UI. Upload a recording and walk
 // away — the Cloud Function transcribes and analyzes it; the doc subscription
 // brings the draft back for review whenever it's ready.
-export default function SessionStudio({ isOpen, onClose, books }) {
+export default function SessionStudio({ isOpen, onClose, clubId, books }) {
   const [activeTab, setActiveTab] = useState('new'); // new | history | members
   const [activeSessionId, setActiveSessionId] = useState(null);
-  const { session } = useSession(activeSessionId);
+  const { session } = useSession(clubId, activeSessionId);
 
   if (!isOpen) return null;
 
@@ -69,6 +69,7 @@ export default function SessionStudio({ isOpen, onClose, books }) {
           {activeTab === 'new' ? (
             session && sessionStatus(session) === 'draft' ? (
               <ReviewStep
+                clubId={clubId}
                 session={session}
                 books={books}
                 onPublished={() => {
@@ -78,18 +79,19 @@ export default function SessionStudio({ isOpen, onClose, books }) {
                 onDiscard={resetPipeline}
               />
             ) : session && sessionStatus(session) === 'needs_grading' ? (
-              <GradingStep session={session} />
+              <GradingStep clubId={clubId} session={session} />
             ) : (
               <UploadStep
+                clubId={clubId}
                 session={session}
                 onSessionStarted={setActiveSessionId}
                 onReset={resetPipeline}
               />
             )
           ) : activeTab === 'history' ? (
-            <SessionHistory books={books} onOpenSession={openSessionReview} />
+            <SessionHistory clubId={clubId} books={books} onOpenSession={openSessionReview} />
           ) : (
-            <MembersRegistry />
+            <MembersRegistry clubId={clubId} />
           )}
         </div>
 
