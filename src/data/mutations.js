@@ -347,3 +347,16 @@ export async function fetchVoiceNoteUrl(audioPath) {
   if (!audioPath) return "";
   return getDownloadURL(ref(storage, audioPath));
 }
+
+// ---------- migration (temporary) ----------
+
+// The one-off copy of Flamingo Rock into the clubs/users tree. Owner-only and
+// idempotent server-side; it returns per-collection source and copied counts,
+// which is what the cutover is verified against. Removed together with the
+// callable once the legacy copies go.
+const migrateFlamingoFn = httpsCallable(functions, "migrateFlamingo", { timeout: 540000 });
+
+export async function runFlamingoMigration() {
+  const res = await migrateFlamingoFn();
+  return res.data;
+}

@@ -15,7 +15,7 @@ const navStyle = { display: 'flex', alignItems: 'center', gap: '0.4rem' };
 // Session Studio, logging a read) belong to the page that owns that data, not
 // up here.
 export default function AppLayout() {
-  const { user, logout } = useAuth();
+  const { user, ownerEmail, isAdmin, logout } = useAuth();
   const [isLoginOpen, setIsLoginOpen] = useState(false);
 
   return (
@@ -49,23 +49,28 @@ export default function AppLayout() {
 
             {user ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                {/* Signing in is now open to any Google account, so the pill
+                    says which of the two you are: a club admin, or simply
+                    someone who is signed in and waiting for an invite. */}
                 <span
                   className="admin-pill"
                   style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(42, 26, 46, 0.04)', padding: '0.35rem 0.75rem', borderRadius: '20px', border: '1px solid var(--border)' }}
                 >
-                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--sage)', display: 'inline-block', boxShadow: '0 0 8px var(--sage)' }}></span>
-                  Admin Activo
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isAdmin ? 'var(--sage)' : 'var(--text-muted)', display: 'inline-block', boxShadow: isAdmin ? '0 0 8px var(--sage)' : 'none' }}></span>
+                  {isAdmin ? 'Admin Activo' : ownerEmail}
                 </span>
-                <NavLink to="/biblioteca" className="btn btn-secondary" style={navStyle}>
-                  <BookMarked size={15} /> Mi Biblioteca
-                </NavLink>
+                {isAdmin && (
+                  <NavLink to="/biblioteca" className="btn btn-secondary" style={navStyle}>
+                    <BookMarked size={15} /> Mi Biblioteca
+                  </NavLink>
+                )}
                 <button className="btn btn-secondary btn-icon" onClick={logout} title="Cerrar Sesión">
                   <LogOut size={15} />
                 </button>
               </div>
             ) : (
               <button className="btn btn-secondary" onClick={() => setIsLoginOpen(true)}>
-                <LogIn size={15} /> Iniciar Sesión de Admin
+                <LogIn size={15} /> Iniciar Sesión
               </button>
             )}
           </div>

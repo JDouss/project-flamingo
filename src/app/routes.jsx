@@ -10,6 +10,7 @@ import ClubShelfPage from '../features/club/ClubShelfPage';
 import ClubStatsPage from '../features/club/ClubStatsPage';
 import LibraryPage from '../features/library/LibraryPage';
 import LibraryStatsPage from '../features/library/LibraryStatsPage';
+import MigrationPage from '../features/admin/MigrationPage';
 
 // Club context. The club pages hang off this layout, so the catalog is
 // subscribed once and shared by the shelf and the dashboard instead of once
@@ -28,13 +29,26 @@ function ClubLayout() {
 // only ever fetched for its owner, so a visitor's session never issues the
 // query at all.
 function LibraryLayout() {
-  const { ownerEmail, ready } = useAuth();
-  const { reads, loading, error } = usePersonalReads(ownerEmail);
+  const { ownerEmail, isAdmin, ready } = useAuth();
+  // Sign-in is open to any Google account now, but the reading log is still
+  // the legacy `personal_reads` collection — the allowlisted owner's. It opens
+  // up when reads move under `users/{email}/reads`.
+  const libraryEmail = isAdmin ? ownerEmail : null;
+  const { reads, loading, error } = usePersonalReads(libraryEmail);
 
   if (!ready) return <Loading label="Abriendo tu biblioteca…" />;
-  if (!ownerEmail) return <Navigate to={`/club/${DEFAULT_CLUB_ID}`} replace />;
+  if (!libraryEmail) return <Navigate to={`/club/${DEFAULT_CLUB_ID}`} replace />;
 
-  return <Outlet context={{ ownerEmail, reads, loading, error }} />;
+  return <Outlet context={{ ownerEmail: libraryEmail, reads, loading, error }} />;
+}
+
+// Owner-only, deliberately unlinked: the one-off migration into the new tree
+// and the counts that verify it. Goes away with the callable it drives.
+function RequireOwner({ children }) {
+  const { isAdmin, ready } = useAuth();
+  if (!ready) return <Loading label="Comprobando permisos…" />;
+  if (!isAdmin) return <Navigate to={`/club/${DEFAULT_CLUB_ID}`} replace />;
+  return children;
 }
 
 export default function AppRoutes() {
@@ -54,6 +68,11 @@ export default function AppRoutes() {
               <Route index element={<LibraryPage />} />
               <Route path="estadisticas" element={<LibraryStatsPage />} />
             </Route>
+
+            <Route
+              path="migracion"
+              element={<RequireOwner><MigrationPage /></RequireOwner>}
+            />
 
             {/* Anything unknown goes back to the club shelf. */}
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,6 +1,7 @@
 # Architecture refactor: multi-club, private-by-default, one library per reader
 
-**Status: in progress — P0 and P1 shipped, P2 next.** This document is the hand-off
+**Status: in progress — P0 and P1 shipped; P2 shipped dark and waiting on the
+owner's migration run and the §7 verification; P3 next.** This document is the hand-off
 spec for the implementing model. Read it fully before writing code, implement
 the phases **in order**, one PR per phase, and re-read the *Guardrails*
 section before every phase. When this document and improvisation disagree,
@@ -271,6 +272,11 @@ old data must remain reachable until the copy is verified.
    `users/{ownerEmail}/reads/*` — same ids, unmodified payloads. Storage
    files are not moved.
 3. Return `{ books: {source, copied}, sessions: {...}, reads: {...} }`.
+
+The owner runs it from `/migracion` — an owner-only page, linked from nowhere,
+which calls the callable and renders those counts side by side so the first
+verification step is the screen itself. Page and callable are deleted together
+in P6.
 
 **Verification before any cutover** (owner + implementer together):
 counts match for all three pairs; spot-open in the UI: one legacy-format

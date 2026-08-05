@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { auth, googleProvider, authorizedEmails } from '../../data/firebase';
+import { auth, googleProvider } from '../../data/firebase';
 import { signInWithPopup, signInWithEmailAndPassword } from 'firebase/auth';
 import { X, LogIn, Mail, Lock, ShieldAlert } from 'lucide-react';
 
@@ -19,16 +19,11 @@ export default function LoginModal({ isOpen, onClose }) {
       if (!auth || !googleProvider) {
         throw new Error('La autenticación de Firebase no está configurada o falló al inicializarse.');
       }
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-
-      // UX-level check only; real enforcement lives in Firestore/Storage rules
-      const emailLower = user.email ? user.email.toLowerCase() : '';
-      if (!authorizedEmails.includes(emailLower)) {
-        // Sign out automatically if not authorized
-        await auth.signOut();
-        throw new Error(`No autorizado. Tu correo no está en la lista de miembros autorizados del club.`);
-      }
+      // Any Google account may sign in. What a signed-in visitor can then see
+      // or change is decided per club and enforced by the security rules —
+      // signing an unrecognised email straight back out left no way to ever
+      // reach an invite.
+      await signInWithPopup(auth, googleProvider);
       onClose();
     } catch (err) {
       console.error(err);
@@ -46,14 +41,7 @@ export default function LoginModal({ isOpen, onClose }) {
       if (!auth) {
         throw new Error('La autenticación de Firebase no está configurada o falló al inicializarse.');
       }
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      
-      const emailLower = user.email ? user.email.toLowerCase() : '';
-      if (!authorizedEmails.includes(emailLower)) {
-        await auth.signOut();
-        throw new Error(`No autorizado. Tu correo no está en la lista de miembros autorizados del club.`);
-      }
+      await signInWithEmailAndPassword(auth, email, password);
       onClose();
     } catch (err) {
       console.error(err);
@@ -68,7 +56,7 @@ export default function LoginModal({ isOpen, onClose }) {
       <div className="auth-modal">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 className="serif-title" style={{ fontSize: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <LogIn size={20} className="star-filled" /> Acceso Administrador
+            <LogIn size={20} className="star-filled" /> Iniciar sesión
           </h2>
           <button className="close-btn" style={{ position: 'static' }} onClick={onClose}>
             <X size={18} />
