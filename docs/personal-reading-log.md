@@ -11,9 +11,10 @@ bolted together.
 2. Grade it on the same 1-10 scale the club uses.
 3. Record (or upload) a short voice note; the pipeline turns it into
    structured takeaways: key insights, what stood out, themes, verdict.
-4. **Optionally merge your reads into the main shelf**, so the catalog shows
-   everything you have read — club and personal — in one grid.
-5. A personal dashboard over your own reads only.
+4. **One library.** Books you read with a club and books you read alone are
+   one fact — "books I have read" — so Mi Biblioteca shows both, each card
+   honestly labelled with where it came from.
+5. A personal dashboard over that whole library, using *your* grades.
 6. **Private.** Never visible in the public catalog, never readable by a
    logged-out visitor, enforced server-side.
 
@@ -139,25 +140,35 @@ has the segmenting machinery for hour-long audio.
 The feature has two surfaces, split by intent: **the shelf is for browsing,
 Mi Biblioteca is for managing.**
 
-### The shared shelf (browsing)
+### The club shelf (the club's, not yours)
 
-A signed-in-only **"Incluir mis lecturas"** toggle in the catalog controls
-merges your reads into the main grid. It is off by default, so the catalog
-opens as the club's.
+The club page shows the club's catalog and nothing else. It used to carry an
+**"Incluir mis lecturas"** toggle that merged your reads into it; that is gone,
+inverted deliberately. The club page belongs to the club; the union lives in
+your library.
 
-`readAdapter.js` is the only place that reconciles the two shapes. Club books
-and personal reads are stored separately and graded differently (1-5 stars
-vs 1-10), so the adapter normalizes a read into the card shape — including
-`starsFromTen`, which works precisely because a personal grade uses the same
-1-10 ritual scale as a club debate grade. Search, genre/status filters and
-sorting then apply across both with no special cases.
+### Where the two are reconciled
 
-Personal cards are rendered by the same `BookCard`, marked **"Mi lectura"** in
-the slot where club books show their session label. A read logged without a
-cover gets a cover-shaped placeholder rather than a broken image, so a book
-can still be logged in seconds. Clicking one opens `PersonalReadDetails`;
-clicking a club book still opens `BookDetails`. Editing dispatches the same
-way — personal reads open the library editor, club books the admin panel.
+`readAdapter.js` is the only place that knows both shapes. It produces one item
+shape from a personal read and from a club book, so the list, the filters and
+every statistic treat them alike:
+
+| field | personal read | club book |
+|---|---|---|
+| `myRating` | your `rating` | `grades.end[yourRosterName]`, or null |
+| `clubAvg` | null | average of `grades.end` |
+| `finishedAt` | `finishedAt` | `endDate` |
+| `source` | `'personal'` | `'club'`, plus `clubId` / `clubName` |
+
+`starsFromTen` still bridges the display scales, and works precisely because a
+personal grade uses the same 1-10 ritual scale as a club debate grade.
+
+**Which club books are yours** is decided by the roster: the entry whose
+`email` matches yours gives your roster name, and grades are keyed by that name
+for ever. A club that does not link your email contributes nothing to your
+library — you can still read those books on the club page, they are simply not
+yours to count. Only finished club books join; one still being read belongs to
+the club's shelf, not your history.
 
 ### Mi Biblioteca (managing)
 

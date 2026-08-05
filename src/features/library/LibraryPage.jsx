@@ -3,7 +3,9 @@ import { NavLink, useLocation, useNavigate, useOutletContext } from 'react-route
 import { BookMarked, Lock, Plus, TrendingUp } from 'lucide-react';
 import ReadList from '../personal/ReadList';
 import PersonalReadDetails from '../personal/PersonalReadDetails';
+import BookDetails from '../book-details/BookDetails';
 import LogReadFlow from './LogReadFlow';
+import { PERSONAL_SOURCE } from '../personal/readAdapter';
 
 export function LibraryHeading({ children }) {
   return (
@@ -36,7 +38,7 @@ export function LibraryHeading({ children }) {
 // detail modal is the same one the club shelf opens, so there is a single
 // detail view rather than two that drift apart.
 export default function LibraryPage() {
-  const { ownerEmail, reads, loading, error } = useOutletContext();
+  const { ownerEmail, reads, items, loading, error } = useOutletContext();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -46,7 +48,9 @@ export default function LibraryPage() {
   const [editor, setEditor] = useState(() =>
     handedOverId ? { open: true, readId: handedOverId } : { open: false, readId: null }
   );
-  const [detailReadId, setDetailReadId] = useState(null);
+  // Opening travels as { source, id }: a club book and a personal read can
+  // share an id, and they open different detail views.
+  const [detail, setDetail] = useState(null);
 
   // Consume the hand-off once: a reload or a back-navigation should land on
   // the list, not reopen an editor the reader already closed.
@@ -57,11 +61,13 @@ export default function LibraryPage() {
   // Both views follow the live list, so an open modal reflects edits and
   // pipeline progress instead of the snapshot it was opened with.
   const editingRead = editor.readId ? reads.find((r) => r.id === editor.readId) || null : null;
-  const detailRead = detailReadId ? reads.find((r) => r.id === detailReadId) || null : null;
+  const detailItem = detail
+    ? items.find((i) => i.source === detail.source && i.id === detail.id) || null
+    : null;
 
-  const startEdit = (read) => {
-    setDetailReadId(null);
-    setEditor({ open: true, readId: read.id });
+  const startEdit = (item) => {
+    setDetail(null);
+    setEditor({ open: true, readId: item.id });
   };
 
   const closeEditor = () => setEditor({ open: false, readId: null });
@@ -93,19 +99,36 @@ export default function LibraryPage() {
         </div>
       )}
 
-      <ReadList reads={reads} loading={loading} onOpen={(read) => setDetailReadId(read.id)} onEdit={startEdit} />
+      <ReadList
+        items={items}
+        loading={loading}
+        onOpen={(item) => setDetail({ source: item.source, id: item.id })}
+        onEdit={startEdit}
+      />
 
       {/* An edit hand-off waits for its read rather than opening a blank form. */}
       {editor.open && (!editor.readId || editingRead) && (
         <LogReadFlow ownerEmail={ownerEmail} editRead={editingRead} onClose={closeEditor} />
       )}
 
-      {detailRead && (
+      {detailItem && detailItem.source === PERSONAL_SOURCE && (
         <PersonalReadDetails
-          read={detailRead}
+          read={detailItem.read}
           ownerEmail={ownerEmail}
-          onClose={() => setDetailReadId(null)}
-          onEdit={startEdit}
+          onClose={() => setDetail(null)}
+          onEdit={() => startEdit(detailItem)}
+        />
+      )}
+
+      {/* A club book opens the club's own detail view, read-only: editing it
+          belongs to the club page and its admins. */}
+      {detailItem && detailItem.source !== PERSONAL_SOURCE && (
+        <BookDetails
+          book={detailItem.book}
+          clubId={detailItem.clubId}
+          isAdmin={false}
+          onClose={() => setDetail(null)}
+          onEdit={() => {}}
         />
       )}
     </main>

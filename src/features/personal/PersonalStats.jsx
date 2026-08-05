@@ -43,13 +43,18 @@ function Bar({ label, value, max, caption }) {
   );
 }
 
-export default function PersonalStats({ reads }) {
+// Stats over the whole library: personal reads and club reads together.
+// Rating aggregates use MY grade, never the club's average — these numbers are
+// mine. A club book I never graded still counts as read, and still contributes
+// its pages and its country; it just has no rating to average.
+export default function PersonalStats({ items }) {
+  const reads = items;
   const stats = useMemo(() => {
     const finished = reads.filter((r) => r.status === 'completed');
-    const rated = finished.filter((r) => r.rating != null && !isNaN(Number(r.rating)));
+    const rated = finished.filter((r) => r.myRating != null);
 
     const avg = rated.length
-      ? rated.reduce((sum, r) => sum + Number(r.rating), 0) / rated.length
+      ? rated.reduce((sum, r) => sum + r.myRating, 0) / rated.length
       : null;
 
     const thisYear = new Date().getFullYear();
@@ -73,8 +78,8 @@ export default function PersonalStats({ reads }) {
       const key = (r.genre || '').trim() || 'Sin género';
       if (!genres[key]) genres[key] = { count: 0, sum: 0, rated: 0 };
       genres[key].count += 1;
-      if (r.rating != null) {
-        genres[key].sum += Number(r.rating);
+      if (r.myRating != null) {
+        genres[key].sum += r.myRating;
         genres[key].rated += 1;
       }
     });
@@ -93,7 +98,22 @@ export default function PersonalStats({ reads }) {
       finished.map((r) => (r.country || '').trim()).filter(Boolean)
     );
 
-    const best = [...rated].sort((a, b) => Number(b.rating) - Number(a.rating))[0] || null;
+    // Where my reading comes from: my own log, and each club I read with.
+    const sources = {};
+    finished.forEach((r) => {
+      const key = r.clubName || 'Mis lecturas';
+      if (!sources[key]) sources[key] = { count: 0, sum: 0, rated: 0 };
+      sources[key].count += 1;
+      if (r.myRating != null) {
+        sources[key].sum += r.myRating;
+        sources[key].rated += 1;
+      }
+    });
+    const sourceRows = Object.entries(sources)
+      .map(([name, g]) => ({ name, count: g.count, avg: g.rated ? g.sum / g.rated : null }))
+      .sort((a, b) => b.count - a.count);
+
+    const best = [...rated].sort((a, b) => b.myRating - a.myRating)[0] || null;
     const withNotes = reads.filter((r) => r.insights).length;
 
     return {
@@ -106,6 +126,7 @@ export default function PersonalStats({ reads }) {
       finishedLastYear,
       perMonth,
       genreRows,
+      sourceRows,
       best,
       withNotes,
       totalPages,
@@ -126,6 +147,7 @@ export default function PersonalStats({ reads }) {
 
   const maxMonth = Math.max(...stats.perMonth, 1);
   const maxGenre = Math.max(...stats.genreRows.map((g) => g.count), 1);
+  const maxSource = Math.max(...stats.sourceRows.map((r) => r.count), 1);
   const yearDelta = stats.finishedThisYear - stats.finishedLastYear;
 
   return (
@@ -194,7 +216,7 @@ export default function PersonalStats({ reads }) {
             {stats.best.author ? ` · ${stats.best.author}` : ''}
           </p>
           <p style={{ margin: '0.2rem 0 0', color: 'var(--primary)', fontWeight: 700 }}>
-            {Number(stats.best.rating).toFixed(1)} / 10
+            {stats.best.myRating.toFixed(1)} / 10
           </p>
         </div>
       )}
@@ -226,6 +248,28 @@ export default function PersonalStats({ reads }) {
           ))}
         </div>
       </div>
+
+      {stats.sourceRows.length > 1 && (
+        <div>
+          <h4 className="serif-title" style={{ fontSize: '1.15rem', marginBottom: '0.85rem' }}>
+            Por origen
+          </h4>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {stats.sourceRows.map((row) => (
+              <Bar
+                key={row.name}
+                label={row.name}
+                value={row.count}
+                max={maxSource}
+                caption={row.avg != null ? `${row.count} · ${row.avg.toFixed(1)}` : `${row.count}`}
+              />
+            ))}
+          </div>
+          <p style={{ margin: '0.6rem 0 0', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+            La media es siempre <strong>tu</strong> nota, no la del club.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

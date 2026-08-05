@@ -1,36 +1,26 @@
 import { useState, useMemo } from 'react';
-import { useNavigate, useOutletContext } from 'react-router-dom';
-import { Plus, Search, Filter, SlidersHorizontal, BookOpen, BookMarked, Volume2 } from 'lucide-react';
+import { useOutletContext } from 'react-router-dom';
+import { Plus, Search, Filter, SlidersHorizontal, BookOpen, Volume2 } from 'lucide-react';
 
 import BookCard from '../catalog/BookCard';
 import BookDetails from '../book-details/BookDetails';
 import AdminPanel from '../admin/AdminPanel';
 import SessionStudio from '../session-studio/SessionStudio';
-import PersonalReadDetails from '../personal/PersonalReadDetails';
 import { OpenBook } from '../../ui/ornaments';
 import Loading from '../../ui/Loading';
-import { useAuth } from '../../app/authContext';
-import { usePersonalReads } from '../../data/usePersonalReads';
-import { readToCard, bookToCard, PERSONAL_SOURCE } from '../personal/readAdapter';
+import { bookToCard } from '../personal/readAdapter';
 
-// The club shelf: the catalog, its filters, and the modals that edit what is
-// on it. Session Studio stays a modal opened from here — it acts on this
-// club's sessions, so it belongs to this page rather than the global header.
+// The club shelf: this club's catalog, its filters, and the modals that edit
+// what is on it. Only the club's books live here — a reader's own log belongs
+// to /biblioteca, which is where the two are brought together.
 export default function ClubShelfPage() {
   const { clubId, books, loading, isClubAdmin } = useOutletContext();
-  const { ownerEmail } = useAuth();
-  const navigate = useNavigate();
-  // Every signed-in reader has their own log now, under their own email, so
-  // the shelf can offer to merge it in for anyone.
-  const { reads } = usePersonalReads(ownerEmail);
 
   // Modal states
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [selectedBookId, setSelectedBookId] = useState(null);
   const [editingBook, setEditingBook] = useState(null);
   const [isStudioOpen, setIsStudioOpen] = useState(false);
-  const [selectedReadId, setSelectedReadId] = useState(null);
-  const [includePersonal, setIncludePersonal] = useState(false);
 
   // Filters and sorting states
   const [searchQuery, setSearchQuery] = useState('');
@@ -44,19 +34,7 @@ export default function ClubShelfPage() {
     [books, selectedBookId]
   );
 
-  // The shelf: club books, plus your own reads when the toggle is on. They
-  // are normalized to one card shape so search, filters and sorting apply
-  // across both without special cases below.
-  const shelf = useMemo(() => {
-    const clubCards = books.map(bookToCard);
-    if (!includePersonal || !ownerEmail) return clubCards;
-    return [...clubCards, ...reads.map(readToCard)];
-  }, [books, reads, includePersonal, ownerEmail]);
-
-  const selectedRead = useMemo(
-    () => reads.find((r) => r.id === selectedReadId) || null,
-    [reads, selectedReadId]
-  );
+  const shelf = useMemo(() => books.map(bookToCard), [books]);
 
   const genres = useMemo(() => {
     const allGenres = shelf.map((b) => b.genre).filter(Boolean);
@@ -97,25 +75,7 @@ export default function ClubShelfPage() {
     return result;
   }, [shelf, searchQuery, selectedGenre, selectedStatus, sortBy]);
 
-  // A card can be either kind of book, so opening and editing dispatch on the
-  // source rather than assuming the club catalog.
-  const openCard = (card) => {
-    if (card.source === PERSONAL_SOURCE) setSelectedReadId(card.id);
-    else setSelectedBookId(card.id);
-  };
-
-  // Editing a personal read is the library's job, so the shelf hands it over
-  // to /biblioteca instead of opening an editor the club page doesn't own.
-  const editRead = (read) => {
-    setSelectedReadId(null);
-    navigate('/biblioteca', { state: { editReadId: read.id } });
-  };
-
   const editCard = (card) => {
-    if (card.source === PERSONAL_SOURCE) {
-      editRead(card.read || card);
-      return;
-    }
     setEditingBook(card);
     setIsAdminOpen(true);
   };
@@ -185,8 +145,6 @@ export default function ClubShelfPage() {
               <option value="completed">Leído</option>
               <option value="reading">Leyendo</option>
               <option value="to-read">Por leer</option>
-              {/* Only reachable when your own reads are on the shelf. */}
-              {includePersonal && ownerEmail && <option value="abandoned">Abandonado</option>}
             </select>
           </div>
 
@@ -205,22 +163,6 @@ export default function ClubShelfPage() {
             </select>
           </div>
 
-          {/* Merge your own reads into the club shelf. Signed-in only, and
-              off by default so the catalog opens as the club's. */}
-          {ownerEmail && (
-            <label className={`shelf-toggle ${includePersonal ? 'active' : ''}`}>
-              <input
-                type="checkbox"
-                checked={includePersonal}
-                onChange={(e) => setIncludePersonal(e.target.checked)}
-              />
-              <BookMarked size={14} />
-              Incluir mis lecturas
-              {includePersonal && reads.length > 0 && (
-                <span className="shelf-toggle-count">{reads.length}</span>
-              )}
-            </label>
-          )}
         </div>
       </div>
 
@@ -233,7 +175,7 @@ export default function ClubShelfPage() {
             <BookCard
               key={`${book.source}-${book.id}`}
               book={book}
-              onClick={() => openCard(book)}
+              onClick={() => setSelectedBookId(book.id)}
               onEdit={editCard}
               isAdmin={isClubAdmin}
             />
@@ -288,14 +230,6 @@ export default function ClubShelfPage() {
         />
       )}
 
-      {selectedRead && (
-        <PersonalReadDetails
-          read={selectedRead}
-          ownerEmail={ownerEmail}
-          onClose={() => setSelectedReadId(null)}
-          onEdit={editRead}
-        />
-      )}
     </main>
   );
 }

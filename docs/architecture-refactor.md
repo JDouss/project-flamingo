@@ -1,7 +1,8 @@
 # Architecture refactor: multi-club, private-by-default, one library per reader
 
-**Status: in progress — P0–P3 shipped; the migration has been run and
-verified, and the app now reads and writes the clubs/users tree. P4 next.**
+**Status: in progress — P0–P4 shipped. The migration has been run and
+verified, the app reads and writes the clubs/users tree, and a reader's
+library is now the union of their own reads and their club reads. P5 next.**
 This document is the hand-off
 spec for the implementing model. Read it fully before writing code, implement
 the phases **in order**, one PR per phase, and re-read the *Guardrails*
