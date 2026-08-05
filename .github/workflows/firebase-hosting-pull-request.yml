@@ -39,9 +39,14 @@ jobs:
           VITE_GCP_API_KEY: ${{ secrets.VITE_GCP_API_KEY }}
           VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
 
+      # Pinned deliberately. `latest` meant every deploy ran whatever npm had
+      # published minutes earlier, with no review — and on 2026-08-05 that was
+      # firebase-tools 15.26.0, whose tarball 404s, which blocked every deploy.
+      # Bump this on purpose, not by accident.
       - name: Deploy Preview to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_PROJECT_FLAMINGO_497112 }}
           projectId: project-flamingo-497112
+          firebaseToolsVersion: "15.25.1"
