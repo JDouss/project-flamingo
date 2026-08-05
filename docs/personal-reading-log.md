@@ -134,7 +134,7 @@ has the segmenting machinery for hour-long audio.
 ## UI
 
 The feature has two surfaces, split by intent: **the shelf is for browsing,
-the modal is for managing.**
+Mi Biblioteca is for managing.**
 
 ### The shared shelf (browsing)
 
@@ -158,21 +158,27 @@ way — personal reads open the library editor, club books the admin panel.
 
 ### Mi Biblioteca (managing)
 
-A header button, visible only when signed in, opening a modal with three tabs
-(the `SessionStudio` shell pattern):
+Two pages behind a header link that only appears when signed in, plus one
+modal for the form itself:
 
-- **Nueva lectura** — the log form: title, author, genre, format, rating
-  (1-10 in half steps, shown as stars), dates, free-text notes, cover
-  (upload or pasted URL), and the voice note. The recorder uses
-  `MediaRecorder` with a live timer and playback-before-upload; there is a
-  file-upload fallback for browsers that deny microphone access.
-- **Mis lecturas** — compact rows with cover thumbnails, search and a status
-  filter, each showing its voice-note state. Opening one shows the same
-  `PersonalReadDetails` the shelf opens, so there is a single detail view
-  rather than two that drift apart.
-- **Estadísticas** — personal dashboard: totals, average rating, reads per
-  month, genre breakdown, best-rated, and a this-year-vs-last-year
-  comparison. Scoped to personal reads only.
+- **`/biblioteca`** (`LibraryPage`) — compact rows with cover thumbnails,
+  search and a status filter, each showing its voice-note state. Opening one
+  shows the same `PersonalReadDetails` the shelf opens, so there is a single
+  detail view rather than two that drift apart. The club shelf hands an edit
+  over to this page by read id, so the editor always opens against live data.
+- **`/biblioteca/estadisticas`** (`LibraryStatsPage`) — personal dashboard:
+  totals, average rating, reads per month, genre breakdown, best-rated, and a
+  this-year-vs-last-year comparison. Scoped to personal reads only until the
+  unified library lands.
+- **`LogReadFlow`** — a modal *within* `/biblioteca`: the log form (title,
+  author, genre, format, rating 1-10 in half steps shown as stars, dates,
+  free-text notes, cover by upload or pasted URL) and the voice note. The
+  recorder uses `MediaRecorder` with a live timer and playback-before-upload;
+  there is a file-upload fallback for browsers that deny microphone access.
+
+Both pages hang off a router layout that owns the `usePersonalReads`
+subscription and the auth gate, so the query is issued once and only ever for
+a signed-in owner.
 
 ## Known trade-off: cover privacy
 

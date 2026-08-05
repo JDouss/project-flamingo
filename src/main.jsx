@@ -1,7 +1,7 @@
 import { StrictMode, Component } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import App from './App.jsx'
+import AppRoutes from './app/routes.jsx'
 
 // Error Boundary to catch React render errors and display them visually
 class ErrorBoundary extends Component {
@@ -65,7 +65,7 @@ try {
   createRoot(document.getElementById('root')).render(
     <StrictMode>
       <ErrorBoundary>
-        <App />
+        <AppRoutes />
       </ErrorBoundary>
     </StrictMode>,
   )

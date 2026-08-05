@@ -1,6 +1,6 @@
 # Architecture refactor: multi-club, private-by-default, one library per reader
 
-**Status: approved plan, not yet implemented.** This document is the hand-off
+**Status: in progress — P0 and P1 shipped, P2 next.** This document is the hand-off
 spec for the implementing model. Read it fully before writing code, implement
 the phases **in order**, one PR per phase, and re-read the *Guardrails*
 section before every phase. When this document and improvisation disagree,

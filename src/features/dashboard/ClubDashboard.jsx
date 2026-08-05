@@ -1,7 +1,9 @@
 import { useState, useMemo } from 'react';
-import { X, TrendingUp, Users, BookOpen, Sparkles, Award, FileText, Globe } from 'lucide-react';
+import { TrendingUp, Users, BookOpen, Award, FileText, Globe } from 'lucide-react';
 
-export default function ClubDashboard({ isOpen, onClose, books = [] }) {
+// The club's numbers. Rendered as a page by ClubStatsPage; the modal shell it
+// used to carry is gone, everything below it is unchanged.
+export default function ClubDashboard({ books = [] }) {
   const [sortField, setSortField] = useState('date');
   const [sortAsc, setSortAsc] = useState(false);
 
@@ -191,8 +193,6 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
     };
   }, [books]);
 
-  if (!isOpen) return null;
-
   const toggleSort = (field) => {
     if (sortField === field) {
       setSortAsc(!sortAsc);
@@ -203,24 +203,7 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
   };
 
   return (
-    <>
-      <div className="voice-assistant-overlay" onClick={onClose}></div>
-      <div className="voice-assistant-modal" style={{ maxWidth: '800px', width: '90%' }} onClick={(e) => e.stopPropagation()}>
-        
-        {/* Header */}
-        <div className="voice-assistant-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Sparkles size={20} style={{ color: 'var(--primary)' }} />
-            <h3 className="serif-title" style={{ fontSize: '1.4rem', margin: 0 }}>Panel de Estadísticas Flamingo</h3>
-          </div>
-          <button className="voice-close-btn" onClick={onClose}>
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* Modal Body */}
-        <div className="voice-assistant-body" style={{ textAlign: 'left' }}>
-          
+    <div style={{ textAlign: 'left' }}>
           {gradedBooks.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '4rem 1.5rem', border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)' }}>
               <BookOpen size={44} style={{ color: 'var(--text-muted)', opacity: 0.5, marginBottom: '1rem' }} />
@@ -620,15 +603,6 @@ export default function ClubDashboard({ isOpen, onClose, books = [] }) {
               </div>
             </>
           ) : null}
-        </div>
-
-        {/* Footer */}
-        <div className="voice-assistant-footer">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            Cerrar Dashboard
-          </button>
-        </div>
-      </div>
-    </>
+    </div>
   );
 }
