@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import UploadStep from './UploadStep';
 import GradingStep from './GradingStep';
@@ -14,6 +14,15 @@ export default function SessionStudio({ isOpen, onClose, clubId, books }) {
   const [activeTab, setActiveTab] = useState('new'); // new | history | members
   const [activeSessionId, setActiveSessionId] = useState(null);
   const { session } = useSession(clubId, activeSessionId);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -79,7 +88,7 @@ export default function SessionStudio({ isOpen, onClose, clubId, books }) {
                 onDiscard={resetPipeline}
               />
             ) : session && sessionStatus(session) === 'needs_grading' ? (
-              <GradingStep clubId={clubId} session={session} />
+              <GradingStep key={session.id} clubId={clubId} session={session} />
             ) : (
               <UploadStep
                 clubId={clubId}

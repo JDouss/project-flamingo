@@ -1,4 +1,4 @@
-import React from 'react';
+import { Fragment } from 'react';
 
 /**
  * A lightweight, safe Markdown-to-React parser.
@@ -6,18 +6,38 @@ import React from 'react';
  *   - Headers: # (H1), ## (H2), ### (H3)
  *   - Lists: Unordered (- or *), Ordered (1.)
  *   - Blockquotes: >
+ *   - Inline code: `code`
  *   - Bold: **text**
  *   - Italic: *text*
- *   - Inline code: `code`
  *   - Links: [text](url)
  */
 
 function parseInline(text) {
-  if (!text) return '';
+  if (!text || typeof text !== 'string') return '';
 
   let parts = [{ type: 'text', content: text }];
 
-  // 1. Parse Links: [text](url)
+  // 1. Parse Inline Code FIRST: `code` (protects backtick contents from italic/bold/link regexes)
+  parts = parts.flatMap(part => {
+    if (part.type !== 'text') return part;
+    const regex = /`([^`]+)`/g;
+    const result = [];
+    let lastIndex = 0;
+    let match;
+    while ((match = regex.exec(part.content)) !== null) {
+      if (match.index > lastIndex) {
+        result.push({ type: 'text', content: part.content.substring(lastIndex, match.index) });
+      }
+      result.push({ type: 'code', content: match[1] });
+      lastIndex = regex.lastIndex;
+    }
+    if (lastIndex < part.content.length) {
+      result.push({ type: 'text', content: part.content.substring(lastIndex) });
+    }
+    return result;
+  });
+
+  // 2. Parse Links: [text](url)
   parts = parts.flatMap(part => {
     if (part.type !== 'text') return part;
     const regex = /\[([^\]]+)\]\(([^)]+)\)/g;
@@ -37,7 +57,7 @@ function parseInline(text) {
     return result;
   });
 
-  // 2. Parse Bold: **text**
+  // 3. Parse Bold: **text**
   parts = parts.flatMap(part => {
     if (part.type !== 'text') return part;
     const regex = /\*\*([^*]+)\*\*/g;
@@ -57,7 +77,7 @@ function parseInline(text) {
     return result;
   });
 
-  // 3. Parse Italic: *text*
+  // 4. Parse Italic: *text*
   parts = parts.flatMap(part => {
     if (part.type !== 'text') return part;
     const regex = /\*([^*]+)\*/g;
@@ -69,26 +89,6 @@ function parseInline(text) {
         result.push({ type: 'text', content: part.content.substring(lastIndex, match.index) });
       }
       result.push({ type: 'italic', content: match[1] });
-      lastIndex = regex.lastIndex;
-    }
-    if (lastIndex < part.content.length) {
-      result.push({ type: 'text', content: part.content.substring(lastIndex) });
-    }
-    return result;
-  });
-
-  // 4. Parse Inline Code: `code`
-  parts = parts.flatMap(part => {
-    if (part.type !== 'text') return part;
-    const regex = /`([^`]+)`/g;
-    const result = [];
-    let lastIndex = 0;
-    let match;
-    while ((match = regex.exec(part.content)) !== null) {
-      if (match.index > lastIndex) {
-        result.push({ type: 'text', content: part.content.substring(lastIndex, match.index) });
-      }
-      result.push({ type: 'code', content: match[1] });
       lastIndex = regex.lastIndex;
     }
     if (lastIndex < part.content.length) {
@@ -132,7 +132,7 @@ function parseInline(text) {
 }
 
 export function renderMarkdown(text) {
-  if (!text) return null;
+  if (!text || typeof text !== 'string') return null;
 
   // Split text by double newlines to get paragraphs / blocks
   const blocks = text.split(/\n\s*\n/);
@@ -223,10 +223,10 @@ export function renderMarkdown(text) {
     return (
       <p key={blockIdx} className="md-p">
         {lines.map((line, idx) => (
-          <React.Fragment key={idx}>
+          <Fragment key={idx}>
             {idx > 0 && <br />}
             {parseInline(line)}
-          </React.Fragment>
+          </Fragment>
         ))}
       </p>
     );

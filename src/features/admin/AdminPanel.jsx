@@ -7,36 +7,36 @@ import { useSessionList } from '../../data/useSessions';
 import { saveBook, deleteBook, uploadCover, linkSessionToBook } from '../../data/mutations';
 
 export default function AdminPanel({ isOpen, onClose, clubId, editBook, books }) {
-  const [title, setTitle] = useState('');
-  const [author, setAuthor] = useState('');
-  const [genre, setGenre] = useState('');
-  const [sessionLabel, setSessionLabel] = useState('');
-  const [suggestedBy, setSuggestedBy] = useState('');
+  const [title, setTitle] = useState(editBook?.title || '');
+  const [author, setAuthor] = useState(editBook?.author || '');
+  const [genre, setGenre] = useState(editBook?.genre || '');
+  const [sessionLabel, setSessionLabel] = useState(editBook?.sessionLabel || '');
+  const [suggestedBy, setSuggestedBy] = useState(editBook?.suggestedBy || '');
   // Optional bibliographic data. Empty is always valid: never block saving a
   // review because a page count is unknown.
-  const [pages, setPages] = useState('');
-  const [country, setCountry] = useState('');
-  const [publicationYear, setPublicationYear] = useState('');
-  const [originalLanguage, setOriginalLanguage] = useState('');
-  const [rating, setRating] = useState(5);
-  const [status, setStatus] = useState('completed');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [summary, setSummary] = useState('');
-  const [review, setReview] = useState('');
-  const [privateNotes, setPrivateNotes] = useState('');
-  const [transcriptionId, setTranscriptionId] = useState(null);
+  const [pages, setPages] = useState(editBook?.pages ?? '');
+  const [country, setCountry] = useState(editBook?.country || '');
+  const [publicationYear, setPublicationYear] = useState(editBook?.publicationYear ?? '');
+  const [originalLanguage, setOriginalLanguage] = useState(editBook?.originalLanguage || '');
+  const [rating, setRating] = useState(editBook?.rating || 5);
+  const [status, setStatus] = useState(editBook?.status || 'completed');
+  const [startDate, setStartDate] = useState(editBook?.startDate || '');
+  const [endDate, setEndDate] = useState(editBook?.endDate || '');
+  const [summary, setSummary] = useState(editBook?.summary || '');
+  const [review, setReview] = useState(editBook?.review || '');
+  const [privateNotes, setPrivateNotes] = useState(editBook?.privateNotes || '');
+  const [transcriptionId, setTranscriptionId] = useState(editBook?.transcriptionId || null);
   
   // Image upload state
   const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
+  const [imagePreview, setImagePreview] = useState(editBook?.imageUrl || '');
+  const [imageUrl, setImageUrl] = useState(editBook?.imageUrl || '');
   const [uploadProgress, setUploadProgress] = useState(-1);
   const [dragging, setDragging] = useState(false);
 
   // Quotes and References states
-  const [quotes, setQuotes] = useState([{ text: '', page: '', context: '' }]);
-  const [references, setReferences] = useState([{ title: '', url: '' }]);
+  const [quotes, setQuotes] = useState(editBook?.quotes && editBook.quotes.length > 0 ? editBook.quotes : [{ text: '', page: '', context: '' }]);
+  const [references, setReferences] = useState(editBook?.references && editBook.references.length > 0 ? editBook.references : [{ title: '', url: '' }]);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -50,7 +50,7 @@ export default function AdminPanel({ isOpen, onClose, clubId, editBook, books })
   const [selectedAttendeeName, setSelectedAttendeeName] = useState('');
 
   // Member grades states
-  const [grades, setGrades] = useState({ start: {}, end: {} });
+  const [grades, setGrades] = useState(editBook?.grades || { start: {}, end: {} });
   const { roster } = useRoster(clubId);
   const {
     sessions: sessionDrafts,
@@ -127,66 +127,13 @@ export default function AdminPanel({ isOpen, onClose, clubId, editBook, books })
     }
   };
 
-  // Load existing book data for editing
   useEffect(() => {
-    if (editBook) {
-      setTitle(editBook.title || '');
-      setAuthor(editBook.author || '');
-      setGenre(editBook.genre || '');
-      setSessionLabel(editBook.sessionLabel || '');
-      setSuggestedBy(editBook.suggestedBy || '');
-      setPages(editBook.pages ?? '');
-      setCountry(editBook.country || '');
-      setPublicationYear(editBook.publicationYear ?? '');
-      setOriginalLanguage(editBook.originalLanguage || '');
-      setRating(editBook.rating || 5);
-      setStatus(editBook.status || 'completed');
-      setStartDate(editBook.startDate || '');
-      setEndDate(editBook.endDate || '');
-      setSummary(editBook.summary || '');
-      setReview(editBook.review || '');
-      setPrivateNotes(editBook.privateNotes || '');
-      setTranscriptionId(editBook.transcriptionId || null);
-      setImageUrl(editBook.imageUrl || '');
-      setImagePreview(editBook.imageUrl || '');
-      setQuotes(editBook.quotes && editBook.quotes.length > 0 ? editBook.quotes : [{ text: '', page: '', context: '' }]);
-      setReferences(editBook.references && editBook.references.length > 0 ? editBook.references : [{ title: '', url: '' }]);
-      setGrades(editBook.grades || { start: {}, end: {} });
-    } else {
-      // Reset form
-      setTitle('');
-      setAuthor('');
-      setGenre('');
-      setSessionLabel('');
-      setSuggestedBy('');
-      setPages('');
-      setCountry('');
-      setPublicationYear('');
-      setOriginalLanguage('');
-      setRating(5);
-      setStatus('completed');
-      setStartDate('');
-      setEndDate('');
-      setSummary('');
-      setReview('');
-      setPrivateNotes('');
-      setTranscriptionId(null);
-      setImageFile(null);
-      setImagePreview('');
-      setImageUrl('');
-      setUploadProgress(-1);
-      setQuotes([{ text: '', page: '', context: '' }]);
-      setReferences([{ title: '', url: '' }]);
-      
-      const initialGrades = { start: {}, end: {} };
-      roster.forEach(m => {
-        initialGrades.start[m.name] = '';
-        initialGrades.end[m.name] = '';
-      });
-      setGrades(initialGrades);
-    }
-    setError('');
-  }, [editBook, isOpen, roster]);
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   if (!isOpen) return null;
 
@@ -272,7 +219,7 @@ export default function AdminPanel({ isOpen, onClose, clubId, editBook, books })
       return await uploadCover(imageFile, setUploadProgress);
     } catch (err) {
       console.error(err);
-      throw new Error('Error al subir la imagen de portada. Verifica las reglas de seguridad de almacenamiento.');
+      throw new Error('Error al subir la imagen de portada. Verifica las reglas de seguridad de almacenamiento.', { cause: err });
     }
   };
 

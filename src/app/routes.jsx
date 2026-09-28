@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
 import AuthProvider from './AuthProvider';
 import AppLayout from './AppLayout';
@@ -9,13 +9,14 @@ import { usePersonalReads } from '../data/usePersonalReads';
 import { useClubDoc, useClubMembership, useMyClubLibraries } from '../data/useClub';
 import { myLibrary } from '../features/personal/readAdapter';
 import Loading from '../ui/Loading';
-import LandingPage from '../features/landing/LandingPage';
-import JoinPage from '../features/landing/JoinPage';
-import ClubShelfPage from '../features/club/ClubShelfPage';
-import ClubStatsPage from '../features/club/ClubStatsPage';
-import LibraryPage from '../features/library/LibraryPage';
-import LibraryStatsPage from '../features/library/LibraryStatsPage';
-import MigrationPage from '../features/admin/MigrationPage';
+
+const LandingPage = lazy(() => import('../features/landing/LandingPage'));
+const JoinPage = lazy(() => import('../features/landing/JoinPage'));
+const ClubShelfPage = lazy(() => import('../features/club/ClubShelfPage'));
+const ClubStatsPage = lazy(() => import('../features/club/ClubStatsPage'));
+const LibraryPage = lazy(() => import('../features/library/LibraryPage'));
+const LibraryStatsPage = lazy(() => import('../features/library/LibraryStatsPage'));
+const MigrationPage = lazy(() => import('../features/admin/MigrationPage'));
 
 // Club context and the membership gate in one place. The club pages hang off
 // this layout, so the catalog is subscribed once and shared by the shelf and
@@ -87,30 +88,32 @@ export default function AppRoutes() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route index element={<LandingPage />} />
-            <Route path="join/:inviteCode" element={<JoinPage />} />
+        <Suspense fallback={<Loading label="Cargando…" />}>
+          <Routes>
+            <Route element={<AppLayout />}>
+              <Route index element={<LandingPage />} />
+              <Route path="join/:inviteCode" element={<JoinPage />} />
 
-            <Route path="club/:clubId" element={<ClubLayout />}>
-              <Route index element={<ClubShelfPage />} />
-              <Route path="estadisticas" element={<ClubStatsPage />} />
+              <Route path="club/:clubId" element={<ClubLayout />}>
+                <Route index element={<ClubShelfPage />} />
+                <Route path="estadisticas" element={<ClubStatsPage />} />
+              </Route>
+
+              <Route path="biblioteca" element={<LibraryLayout />}>
+                <Route index element={<LibraryPage />} />
+                <Route path="estadisticas" element={<LibraryStatsPage />} />
+              </Route>
+
+              <Route
+                path="migracion"
+                element={<RequireClubAdmin><MigrationPage /></RequireClubAdmin>}
+              />
+
+              {/* Anything unknown goes back to the front door. */}
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
-
-            <Route path="biblioteca" element={<LibraryLayout />}>
-              <Route index element={<LibraryPage />} />
-              <Route path="estadisticas" element={<LibraryStatsPage />} />
-            </Route>
-
-            <Route
-              path="migracion"
-              element={<RequireClubAdmin><MigrationPage /></RequireClubAdmin>}
-            />
-
-            {/* Anything unknown goes back to the front door. */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
+          </Routes>
+        </Suspense>
       </AuthProvider>
     </BrowserRouter>
   );

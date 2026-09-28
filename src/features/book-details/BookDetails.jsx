@@ -3,6 +3,8 @@ import { X, Star, ChevronLeft, ChevronRight, Quote, Link, Edit2, Volume2 } from 
 import { renderMarkdown } from '../../utils/markdown';
 import { fetchSessionById, fetchTranscript } from '../../data/useSessions';
 
+const FALLBACK_COVER = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450"><rect width="100%" height="100%" fill="%232a1a2e"/><circle cx="150" cy="180" r="60" fill="%23d68286" opacity="0.2"/><path d="M150 140 v80 M120 180 h60" stroke="%23d68286" stroke-width="6" stroke-linecap="round"/><text x="150" y="280" font-family="serif" font-size="20" fill="%23fcf9f4" text-anchor="middle" font-weight="bold">Flamingo</text><text x="150" y="310" font-family="sans-serif" font-size="12" fill="%23fcf9f4" opacity="0.6" text-anchor="middle">Club de Lectura</text></svg>`;
+
 export default function BookDetails({ book, onClose, onEdit, isAdmin, clubId }) {
   const [activeQuoteIdx, setActiveQuoteIdx] = useState(0);
   const [sessionData, setSessionData] = useState(null);
@@ -11,12 +13,17 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, clubId }) 
   const [loadingTranscript, setLoadingTranscript] = useState(false);
 
   useEffect(() => {
-    setSessionData(null);
-    setTranscript('');
-    if (!book?.transcriptionId) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!book?.transcriptionId || !clubId) return;
 
     let cancelled = false;
-    setLoadingSession(true);
     fetchSessionById(clubId, book.transcriptionId)
       .then((session) => {
         if (!cancelled) setSessionData(session);
@@ -26,7 +33,7 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, clubId }) 
         if (!cancelled) setLoadingSession(false);
       });
     return () => { cancelled = true; };
-  }, [book]);
+  }, [book?.transcriptionId, clubId]);
 
   // The full transcript lives in Storage: download it only when the user
   // expands the section, so the details modal stays light.
@@ -77,7 +84,17 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, clubId }) 
         {/* Hero Section */}
         <div className="details-hero">
           <div className="book-object">
-            <img src={imageUrl} alt={title} className="details-cover" />
+            <img
+              src={imageUrl || FALLBACK_COVER}
+              alt={title}
+              className="details-cover"
+              loading="lazy"
+              decoding="async"
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = FALLBACK_COVER;
+              }}
+            />
           </div>
           <div className="details-header-info">
             <div className="details-tags">
@@ -373,40 +390,43 @@ export default function BookDetails({ book, onClose, onEdit, isAdmin, clubId }) 
           )}
 
           {/* Quotes Section */}
-          {quotes && quotes.length > 0 && (
-            <div>
-              <h3 className="section-title">
-                <Quote size={20} className="star-filled" style={{ transform: 'rotate(180deg)' }} /> Citas memorables
-              </h3>
-              
-              <div className="quotes-carousel">
-                <div className="quote-fade" key={activeQuoteIdx}>
-                  <div className="quote-text">
-                    “{quotes[activeQuoteIdx].text}”
+          {quotes && quotes.length > 0 && (() => {
+            const currentQuote = quotes[activeQuoteIdx] || quotes[0];
+            return (
+              <div>
+                <h3 className="section-title">
+                  <Quote size={20} className="star-filled" style={{ transform: 'rotate(180deg)' }} /> Citas memorables
+                </h3>
+                
+                <div className="quotes-carousel">
+                  <div className="quote-fade" key={activeQuoteIdx}>
+                    <div className="quote-text">
+                      “{currentQuote?.text || ''}”
+                    </div>
+                    <div className="quote-author">
+                      — {author}
+                      {currentQuote?.page && `, pág. ${currentQuote.page}`}
+                      {currentQuote?.context && ` (${currentQuote.context})`}
+                    </div>
                   </div>
-                  <div className="quote-author">
-                    — {author}
-                    {quotes[activeQuoteIdx].page && `, pág. ${quotes[activeQuoteIdx].page}`}
-                    {quotes[activeQuoteIdx].context && ` (${quotes[activeQuoteIdx].context})`}
-                  </div>
-                </div>
 
-                {quotes.length > 1 && (
-                  <div className="carousel-nav">
-                    <button className="carousel-btn" onClick={handlePrevQuote} title="Cita anterior">
-                      <ChevronLeft size={16} />
-                    </button>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', alignSelf: 'center', margin: '0 0.5rem' }}>
-                      {activeQuoteIdx + 1} de {quotes.length}
-                    </span>
-                    <button className="carousel-btn" onClick={handleNextQuote} title="Cita siguiente">
-                      <ChevronRight size={16} />
-                    </button>
-                  </div>
-                )}
+                  {quotes.length > 1 && (
+                    <div className="carousel-nav">
+                      <button className="carousel-btn" onClick={handlePrevQuote} title="Cita anterior">
+                        <ChevronLeft size={16} />
+                      </button>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', alignSelf: 'center', margin: '0 0.5rem' }}>
+                        {activeQuoteIdx + 1} de {quotes.length}
+                      </span>
+                      <button className="carousel-btn" onClick={handleNextQuote} title="Cita siguiente">
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* References & Links */}
           {references && references.length > 0 && (

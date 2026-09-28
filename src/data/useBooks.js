@@ -6,17 +6,12 @@ import { clubBooksCollection } from "./paths";
 // are effectively free at club scale).
 export function useBooks(clubId) {
   const [books, setBooks] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(clubId));
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!clubId) {
-      setBooks([]);
-      setLoading(false);
-      return;
-    }
+    if (!clubId) return;
 
-    setLoading(true);
     // Safety net: if the snapshot never arrives (hung transport, offline),
     // stop showing the infinite spinner. The listener stays attached and
     // will still populate books whenever the connection recovers.
@@ -46,5 +41,9 @@ export function useBooks(clubId) {
     };
   }, [clubId]);
 
-  return { books, loading, error };
+  return {
+    books: clubId ? books : [],
+    loading: clubId ? loading : false,
+    error,
+  };
 }

@@ -37,15 +37,10 @@ export function isSessionStale(session) {
 // the Cloud Function pipeline (uploading → processing → draft → published).
 export function useSession(clubId, sessionId) {
   const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(!!sessionId);
+  const [loading, setLoading] = useState(Boolean(clubId && sessionId));
 
   useEffect(() => {
-    if (!clubId || !sessionId) {
-      setSession(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!clubId || !sessionId) return;
     const unsubscribe = onSnapshot(
       clubSessionDoc(clubId, sessionId),
       (snap) => {
@@ -60,14 +55,18 @@ export function useSession(clubId, sessionId) {
     return () => unsubscribe();
   }, [clubId, sessionId]);
 
-  return { session, loading };
+  const active = Boolean(clubId && sessionId);
+  return {
+    session: active ? session : null,
+    loading: active ? loading : false,
+  };
 }
 
 // One-shot session list for the history tab (docs are light: transcripts
 // live in Storage, only an excerpt is inlined).
 export function useSessionList(clubId, enabled) {
   const [sessions, setSessions] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(Boolean(enabled && clubId));
 
   const refresh = useCallback(async () => {
     if (!clubId) return;
@@ -84,10 +83,29 @@ export function useSessionList(clubId, enabled) {
   }, [clubId]);
 
   useEffect(() => {
-    if (enabled) refresh();
-  }, [enabled, refresh]);
+    if (!enabled || !clubId) return;
+    let cancelled = false;
+    const q = query(clubSessionsCollection(clubId), orderBy("createdAt", "desc"));
+    getDocs(q)
+      .then((snapshot) => {
+        if (!cancelled) setSessions(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+      })
+      .catch((err) => {
+        console.error("Failed to load session history:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
-  return { sessions, loading, refresh };
+    return () => { cancelled = true; };
+  }, [clubId, enabled]);
+
+  const active = Boolean(enabled && clubId);
+  return {
+    sessions: active ? sessions : [],
+    loading: active ? loading : false,
+    refresh,
+  };
 }
 
 export async function fetchSessionById(clubId, sessionId) {

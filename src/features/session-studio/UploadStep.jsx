@@ -49,7 +49,7 @@ export default function UploadStep({ clubId, session, onSessionStarted, onReset 
   const [dragging, setDragging] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [uploadProgress, setUploadProgress] = useState(-1);
-  const [funnyMsg, setFunnyMsg] = useState('');
+  const [funnyMsg, setFunnyMsg] = useState(() => FUNNY_MESSAGES[0]);
   const [retrying, setRetrying] = useState(false);
 
   const status = session ? sessionStatus(session) : null;
@@ -57,13 +57,10 @@ export default function UploadStep({ clubId, session, onSessionStarted, onReset 
   const isWorking = status === 'queued' || status === 'transcribing' || status === 'analyzing';
 
   useEffect(() => {
-    if (status !== 'transcribing' && status !== 'analyzing') {
-      setFunnyMsg('');
-      return;
-    }
-    const pick = () => FUNNY_MESSAGES[Math.floor(Math.random() * FUNNY_MESSAGES.length)];
-    setFunnyMsg(pick());
-    const intervalId = setInterval(() => setFunnyMsg(pick()), 4000);
+    if (status !== 'transcribing' && status !== 'analyzing') return;
+    const intervalId = setInterval(() => {
+      setFunnyMsg(FUNNY_MESSAGES[Math.floor(Math.random() * FUNNY_MESSAGES.length)]);
+    }, 4000);
     return () => clearInterval(intervalId);
   }, [status]);
 

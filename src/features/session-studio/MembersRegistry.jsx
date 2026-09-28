@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { User, Save, Loader2, Plus, Trash2, Link2 } from 'lucide-react';
 import { useRoster } from '../../data/useClub';
 
@@ -12,25 +12,22 @@ import { useRoster } from '../../data/useClub';
 // under the old name, and nothing here ever touches them.
 export default function MembersRegistry({ clubId }) {
   const { roster, loading, saveRoster } = useRoster(clubId);
-  const [drafts, setDrafts] = useState([]);
+  const [editingDrafts, setEditingDrafts] = useState(null);
+  const drafts = editingDrafts ?? roster;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    setDrafts(roster);
-  }, [roster]);
-
   const updateDraft = (index, field, value) => {
-    setDrafts((prev) => {
-      const copy = [...prev];
+    setEditingDrafts((prev) => {
+      const copy = [...(prev ?? roster)];
       copy[index] = { ...copy[index], [field]: value };
       return copy;
     });
   };
 
-  const addEntry = () => setDrafts((prev) => [...prev, { name: '', personaHint: '', email: null }]);
+  const addEntry = () => setEditingDrafts((prev) => [...(prev ?? roster), { name: '', personaHint: '', email: null }]);
 
-  const removeEntry = (index) => setDrafts((prev) => prev.filter((_, i) => i !== index));
+  const removeEntry = (index) => setEditingDrafts((prev) => (prev ?? roster).filter((_, i) => i !== index));
 
   const handleSave = async () => {
     const cleaned = drafts
@@ -63,6 +60,7 @@ export default function MembersRegistry({ clubId }) {
     setError('');
     try {
       await saveRoster(cleaned);
+      setEditingDrafts(null);
     } catch (err) {
       console.error('Failed to save roster:', err);
       setError('Error al guardar: ' + err.message);

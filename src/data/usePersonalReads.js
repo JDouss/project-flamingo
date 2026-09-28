@@ -26,18 +26,12 @@ export function isNoteStale(read) {
 // Sorting stays client-side; the collection is small.
 export function usePersonalReads(ownerEmail) {
   const [reads, setReads] = useState([]);
-  const [loading, setLoading] = useState(!!ownerEmail);
+  const [loading, setLoading] = useState(Boolean(ownerEmail));
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!ownerEmail) {
-      setReads([]);
-      setLoading(false);
-      setError(null);
-      return;
-    }
+    if (!ownerEmail) return;
 
-    setLoading(true);
     const unsubscribe = onSnapshot(
       userReadsCollection(ownerEmail),
       (snapshot) => {
@@ -59,5 +53,9 @@ export function usePersonalReads(ownerEmail) {
     return () => unsubscribe();
   }, [ownerEmail]);
 
-  return { reads, loading, error };
+  return {
+    reads: ownerEmail ? reads : [],
+    loading: ownerEmail ? loading : false,
+    error: ownerEmail ? error : null,
+  };
 }

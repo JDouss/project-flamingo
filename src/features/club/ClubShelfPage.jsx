@@ -202,6 +202,7 @@ export default function ClubShelfPage() {
       {/* Editors and details, scoped to this page's data. */}
       {isAdminOpen && (
         <AdminPanel
+          key={editingBook?.id || 'new'}
           isOpen={isAdminOpen}
           onClose={() => setIsAdminOpen(false)}
           clubId={clubId}

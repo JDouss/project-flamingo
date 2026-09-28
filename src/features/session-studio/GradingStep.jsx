@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { Sparkles, Volume2, AlertTriangle, FileAudio, Play, RotateCcw, Plus, X, Info } from 'lucide-react';
 import { useRoster } from '../../data/useClub';
 import { requestAnalysis, requestTranscription } from '../../data/mutations';
@@ -24,38 +24,32 @@ const ROUND_META = {
 // said it. No diarization involved: identification is per-moment, by ear.
 export default function GradingStep({ clubId, session }) {
   const { roster } = useRoster(clubId);
-  const [rows, setRows] = useState([]);
-  const [transcript, setTranscript] = useState('');
-  const [loadingTranscript, setLoadingTranscript] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const audioRef = useRef(null);
-
-  // Seed editable rows from the detected grade moments (or the previously
-  // confirmed list when reopening a draft).
-  useEffect(() => {
+  const [rows, setRows] = useState(() => {
     const confirmed = session.confirmedGrades;
     if (Array.isArray(confirmed) && confirmed.length > 0) {
-      setRows(confirmed.map((g, i) => ({
+      return confirmed.map((g, i) => ({
         id: `c${i}`,
         round: g.round === 'end' ? 'end' : 'start',
         t: g.t ?? null,
         quote: g.quote || '',
         value: g.value ?? '',
         member: g.member || '',
-      })));
-      return;
+      }));
     }
     const events = session.gradeEvents || [];
-    setRows(events.map((e, i) => ({
+    return events.map((e, i) => ({
       id: `e${i}`,
       round: e.round === 'end' ? 'end' : 'start',
       t: e.t ?? null,
       quote: e.quote || '',
       value: e.value ?? '',
       member: e.suggestedMember || '',
-    })));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id]);
+    }));
+  });
+  const [transcript, setTranscript] = useState('');
+  const [loadingTranscript, setLoadingTranscript] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const audioRef = useRef(null);
 
   const playAt = (t) => {
     const audio = audioRef.current;

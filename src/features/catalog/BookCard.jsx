@@ -2,6 +2,8 @@
 import { Star, Edit2, Calendar, User, BookOpen } from 'lucide-react';
 import { PERSONAL_SOURCE } from '../personal/readAdapter';
 
+const FALLBACK_COVER = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450"><rect width="100%" height="100%" fill="%232a1a2e"/><circle cx="150" cy="180" r="60" fill="%23d68286" opacity="0.2"/><path d="M150 140 v80 M120 180 h60" stroke="%23d68286" stroke-width="6" stroke-linecap="round"/><text x="150" y="280" font-family="serif" font-size="20" fill="%23fcf9f4" text-anchor="middle" font-weight="bold">Flamingo</text><text x="150" y="310" font-family="sans-serif" font-size="12" fill="%23fcf9f4" opacity="0.6" text-anchor="middle">Club de Lectura</text></svg>`;
+
 export default function BookCard({ book, onClick, onEdit, isAdmin }) {
   const { title, author, genre, rating, status, summary, imageUrl, endDate, sessionLabel, suggestedBy, source } = book;
 
@@ -44,7 +46,17 @@ export default function BookCard({ book, onClick, onEdit, isAdmin }) {
     <div className="glass-card book-card" onClick={onClick}>
       <div className="book-cover-container">
         {imageUrl ? (
-          <img src={imageUrl} alt={title} className="book-cover-img" loading="lazy" />
+          <img
+            src={imageUrl}
+            alt={title}
+            className="book-cover-img"
+            loading="lazy"
+            decoding="async"
+            onError={(e) => {
+              e.currentTarget.onerror = null;
+              e.currentTarget.src = FALLBACK_COVER;
+            }}
+          />
         ) : (
           // A personal read can be logged in seconds without hunting for a
           // cover; the shelf still needs something with the right shape.

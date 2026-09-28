@@ -49,10 +49,10 @@ initializeApp();
 
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 
-// 3.6 Flash: same input price as 3.5 Flash, cheaper output ($7.50 vs $9.00
-// per 1M) and ~17% fewer output tokens, with the same 1M context / 65k
-// output / structured-output surface this pipeline relies on.
-const GEMINI_MODEL = "gemini-3.6-flash";
+// Optimized Gemini models: gemini-3.5-flash-lite is the best for cost-efficiency and multimodal audio/JSON
+// ($0.10 / 1M input, $0.40 / 1M output vs $7.50 / 1M output on standard Flash).
+const GEMINI_PRIMARY_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+const GEMINI_FALLBACK_MODEL = "gemini-3.6-flash";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com";
 // Legacy collections, still read by the migration and by nothing else.
 const SESSIONS_COLLECTION = "transcriptions";
@@ -199,33 +199,66 @@ function deleteGeminiFile(name, apiKey) {
 }
 
 async function generateContent(parts, apiKey, generationConfig = {}) {
-  const res = await fetch(
-    `${GEMINI_BASE}/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: { maxOutputTokens: 65536, ...generationConfig },
-      }),
+  const modelsToTry = [GEMINI_PRIMARY_MODEL];
+  if (GEMINI_PRIMARY_MODEL !== GEMINI_FALLBACK_MODEL) {
+    modelsToTry.push(GEMINI_FALLBACK_MODEL);
+  }
+
+  let lastErr = null;
+  for (const model of modelsToTry) {
+    try {
+      const res = await fetch(
+        `${GEMINI_BASE}/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: {
+              maxOutputTokens: 65536,
+              thinkingConfig: {
+                thinkingLevel: "minimal",
+              },
+              ...generationConfig,
+            },
+          }),
+        }
+      );
+
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("");
+        if (!text) {
+          throw new Error(
+            `Gemini returned an empty response (finishReason: ${data?.candidates?.[0]?.finishReason || "unknown"}).`
+          );
+        }
+        return text;
+      }
+
+      const errText = await res.text();
+      // If 404 Not Found or model unsupported, try fallback
+      if (res.status === 404 || errText.toLowerCase().includes("not found") || errText.toLowerCase().includes("not supported")) {
+        logger.warn(`Model ${model} unavailable (${res.status}), trying fallback...`);
+        lastErr = new Error(`Gemini ${model} failed (${res.status}): ${errText}`);
+        continue;
+      }
+
+      throw new Error(`Gemini generateContent failed (${res.status}): ${errText}`);
+    } catch (err) {
+      lastErr = err;
+      if (!err.message?.toLowerCase().includes("not found") && !err.message?.toLowerCase().includes("not supported")) {
+        throw err;
+      }
     }
-  );
-  if (!res.ok) {
-    throw new Error(`Gemini generateContent failed (${res.status}): ${await res.text()}`);
   }
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("");
-  if (!text) {
-    throw new Error(
-      `Gemini returned an empty response (finishReason: ${data?.candidates?.[0]?.finishReason || "unknown"}).`
-    );
-  }
-  return text;
+
+  throw lastErr || new Error("Gemini generateContent failed across all models.");
 }
 
-// Retries VARY the sampling temperature: an identical re-send tends to fall
-// into the same degenerate mode; changing the temperature breaks the pattern.
-const RETRY_TEMPERATURES = [0.7, 1.0, 0.3, 1.3];
+// Retries vary the sampling temperature: start low for factual transcription/JSON,
+// and slightly increase if stuck in a degenerate mode.
+const RETRY_TEMPERATURES = [0.1, 0.2, 0.4, 0.7];
 
 async function generateChunkWithRetry(parts, apiKey, tries = 4) {
   let lastErr;

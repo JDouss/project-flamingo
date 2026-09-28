@@ -6,16 +6,11 @@ import { clubBooksCollection, clubDoc, clubMemberDoc } from "./paths";
 // only admins can write, which the rules enforce.
 export function useClubDoc(clubId) {
   const [club, setClub] = useState(null);
-  const [loading, setLoading] = useState(!!clubId);
+  const [loading, setLoading] = useState(Boolean(clubId));
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!clubId) {
-      setClub(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!clubId) return;
     const unsubscribe = onSnapshot(
       clubDoc(clubId),
       (snap) => {
@@ -34,22 +29,21 @@ export function useClubDoc(clubId) {
     return () => unsubscribe();
   }, [clubId]);
 
-  return { club, loading, error };
+  return {
+    club: clubId ? club : null,
+    loading: clubId ? loading : false,
+    error,
+  };
 }
 
 // Am I in this club, and as what? The membership doc is the authority — the
 // token claim mirrors it for Storage, but can lag until the token refreshes.
 export function useClubMembership(clubId, email) {
   const [role, setRole] = useState(null);
-  const [loading, setLoading] = useState(!!(clubId && email));
+  const [loading, setLoading] = useState(Boolean(clubId && email));
 
   useEffect(() => {
-    if (!clubId || !email) {
-      setRole(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!clubId || !email) return;
     const unsubscribe = onSnapshot(
       clubMemberDoc(clubId, email),
       (snap) => {
@@ -64,7 +58,13 @@ export function useClubMembership(clubId, email) {
     return () => unsubscribe();
   }, [clubId, email]);
 
-  return { role, isMember: role !== null, isClubAdmin: role === "admin", loading };
+  const active = Boolean(clubId && email);
+  return {
+    role: active ? role : null,
+    isMember: active && role !== null,
+    isClubAdmin: active && role === "admin",
+    loading: active ? loading : false,
+  };
 }
 
 // The roster: the humans in the club's ritual, as an array on the club doc.
@@ -89,20 +89,15 @@ export function useRoster(clubId) {
 // any index-backed alternative, and it keeps the library live.
 export function useMyClubLibraries(clubIds, email) {
   const [libraries, setLibraries] = useState([]);
-  const [loading, setLoading] = useState(clubIds.length > 0);
+  const [loading, setLoading] = useState(Boolean(clubIds.length > 0 && email));
   // Effects key off the joined ids: a fresh array with the same contents
   // must not tear down and rebuild every subscription.
   const key = clubIds.join(",");
 
   useEffect(() => {
     const ids = key ? key.split(",") : [];
-    if (ids.length === 0 || !email) {
-      setLibraries([]);
-      setLoading(false);
-      return;
-    }
+    if (ids.length === 0 || !email) return;
 
-    setLoading(true);
     const state = new Map(ids.map((id) => [id, { club: null, books: null }]));
     const emit = () => {
       const ready = [...state.entries()]
@@ -142,7 +137,11 @@ export function useMyClubLibraries(clubIds, email) {
     return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }, [key, email]);
 
-  return { libraries, loading };
+  const active = Boolean(clubIds.length > 0 && email);
+  return {
+    libraries: active ? libraries : [],
+    loading: active ? loading : false,
+  };
 }
 
 // The clubs I belong to, by name — just enough for a switcher. The ids come
@@ -154,10 +153,7 @@ export function useMyClubs(clubIds) {
 
   useEffect(() => {
     const ids = key ? key.split(",") : [];
-    if (ids.length === 0) {
-      setClubs([]);
-      return;
-    }
+    if (ids.length === 0) return;
 
     const names = new Map(ids.map((id) => [id, { id, name: id }]));
     const emit = () => setClubs(ids.map((id) => names.get(id)));
@@ -179,5 +175,5 @@ export function useMyClubs(clubIds) {
     return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }, [key]);
 
-  return clubs;
+  return clubIds.length > 0 ? clubs : [];
 }
